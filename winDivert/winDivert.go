@@ -28,7 +28,7 @@ var winDivert64Sys []byte;
 var divertDll="WinDivert32.dll";
 var divertSys="C:\\Windows\\System32\\WinDivert32.sys";
 
-func init() {
+func init1() {
 	if runtime.GOARCH == "amd64" {
 		divertDll ="WinDivert64.dll"
 		divertSys ="C:\\Windows\\System32\\WinDivert64.sys";

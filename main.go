@@ -2,6 +2,8 @@ package main
 
 import (
 	_ "goSocksTap/socksTap"
+	"strconv"
+	"strings"
 	"time"
 )
 import "fmt"
@@ -22,12 +24,14 @@ func main(){
 
 
 func getdd(lSocks string)error{
-
+	socksAddrs:=strings.Split(lSocks,":")
+	lPort, err := strconv.Atoi(socksAddrs[1])
 	var serverPid=0;
 	// get only listening TCP sockets
 	tabs, err := netstat.TCPSocks(func(s *netstat.SockTabEntry) bool {
-		return s.State == netstat.Listen && s.LocalAddr.String()==lSocks
+		return s.State == netstat.Listen && s.LocalAddr.Port==uint16(lPort)
 	})
+
 	if err != nil {
 		return err
 	}
