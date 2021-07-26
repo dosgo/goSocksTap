@@ -9,6 +9,7 @@ import (
 	"goSocksTap/comm/socks"
 	"goSocksTap/comm/tun2socks"
 	"goSocksTap/winDivert"
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
@@ -44,6 +45,7 @@ type TunDns struct {
 	dnsAddrV6 string;
 	dnsPort string;
 	ip2Domain *bimap.BiMap
+	singleflight   *singleflight.Group
 }
 
 
@@ -70,6 +72,7 @@ func (fakeDns *SocksTap)Start(localSocks string,excludeDomain string) {
 	fakeDns.tunDns.dnsAddr="127.0.0.1"
 	fakeDns.tunDns.dnsAddrV6="0:0:0:0:0:0:0:1"
 	fakeDns.tunDns.ip2Domain= bimap.NewBiMap()
+	fakeDns.tunDns.singleflight  = &singleflight.Group{}
 	if excludeDomain=="" {
 		fakeDns.tunDns.excludeDomain ="localhost";
 	}else {
@@ -259,7 +262,10 @@ func (tunDns *TunDns) doIPv4Query(r *dns.Msg) (*dns.Msg, error) {
 	m.SetReply(r)
 	m.Authoritative = false
 	domain := r.Question[0].Name
-	m.Answer =tunDns.ipv4Res(domain,nil,r);
+	v, _, _ := tunDns.singleflight.Do(domain, func() (interface{}, error) {
+		return tunDns.ipv4Res(domain,nil,r);
+	})
+	m.Answer =v.( []dns.RR )
 	// final
 	return m, nil
 }
@@ -290,7 +296,7 @@ func  (tunDns *TunDns)ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 
 /*ipv4智能响应*/
-func (tunDns *TunDns)ipv4Res(domain string,_ip  net.IP,r *dns.Msg) []dns.RR {
+func (tunDns *TunDns)ipv4Res(domain string,_ip  net.IP,r *dns.Msg) ([]dns.RR,error) {
 	var ip ="";
 	var ipTtl uint32=60;
 	var dnsErr=false;
@@ -358,7 +364,7 @@ func (tunDns *TunDns)ipv4Res(domain string,_ip  net.IP,r *dns.Msg) []dns.RR {
 	return []dns.RR{&dns.A{
 		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: ipTtl},
 		A:   net.ParseIP(ip),
-	}}
+	}},nil;
 }
 
 func  (tunDns *TunDns)resolve(r *dns.Msg) (*dns.Msg, error) {
