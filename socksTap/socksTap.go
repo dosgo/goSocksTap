@@ -227,6 +227,7 @@ func (fakeDns *SocksTap) dnsToAddr(remoteAddr string) string{
 	domain:=_domain.(string)
 	ip, err := fakeDns.safeDns.Resolve(domain[0 : len(domain)-1])
 	if err!=nil{
+		log.Printf("err:%+v\r\n",err)
 		return "";
 	}
 	return ip+":"+remoteAddrs[1]

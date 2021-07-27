@@ -66,32 +66,34 @@ func (rd *DoT)Connect() error {
 
 
 func (rd *DoT)Resolve(remoteHost string) (string,error){
-	if !rd.connect{
-		err:=rd.Connect();
-		if err!=nil {
-			return "",err;
-		}
-	}
+	query := &dns.Msg{}
+	query.SetQuestion(remoteHost+".", dns.TypeA)
 	var ip="";
 	var err error
 	cache,_:= dnsCache.ReadDnsCache(remoteHost)
 	if cache!="" {
 		return  cache,nil;
 	}
-	query := &dns.Msg{}
-	query.SetQuestion(remoteHost+".", dns.TypeA)
-	response,_,err:=rd.dnsClient.ExchangeWithConn(query,rd.dnsClientConn)
-	if err!=nil{
-		return "",err;
-	}
-	if err==nil {
-		for _, v := range response.Answer {
-			record, isType := v.(*dns.A)
-			if isType {
-				ip=record.A.String();
-				dnsCache.WriteDnsCache(remoteHost,record.Hdr.Ttl,ip);
-				break;
+
+	for i:=0;i<2;i++{
+		if !rd.connect {
+			err= rd.Connect();
+			if err != nil {
+				continue;
 			}
+		}
+		response, _, err := rd.dnsClient.ExchangeWithConn(query, rd.dnsClientConn)
+		if err == nil {
+			for _, v := range response.Answer {
+				record, isType := v.(*dns.A)
+				if isType {
+					ip = record.A.String();
+					dnsCache.WriteDnsCache(remoteHost, record.Hdr.Ttl, ip);
+					return ip,nil;
+				}
+			}
+		}else{
+			rd.connect=false;
 		}
 	}
 	return ip,err;
