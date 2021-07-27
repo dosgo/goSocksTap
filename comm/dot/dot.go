@@ -5,14 +5,12 @@ import (
 	"errors"
 	"github.com/miekg/dns"
 	"goSocksTap/comm/socks"
-	"sync"
+	"goSocksTap/comm"
 	"net"
-	"strconv"
-	"strings"
 	"time"
 )
 
-var dnsCache *DnsCache
+var dnsCache *comm.DnsCache
 
 type DoT struct {
 	Addr string;
@@ -24,7 +22,7 @@ type DoT struct {
 }
 
 func init(){
-	dnsCache = &DnsCache{cache: make(map[string]string, 128)}
+	dnsCache = &comm.DnsCache{Cache: make(map[string]string, 128)}
 }
 
 
@@ -69,11 +67,14 @@ func (rd *DoT)Connect() error {
 
 func (rd *DoT)Resolve(remoteHost string) (string,error){
 	if !rd.connect{
-		rd.Connect();
+		err:=rd.Connect();
+		if err!=nil {
+			return "",err;
+		}
 	}
 	var ip="";
 	var err error
-	cache:= readDnsCache(remoteHost)
+	cache,_:= dnsCache.ReadDnsCache(remoteHost)
 	if cache!="" {
 		return  cache,nil;
 	}
@@ -88,7 +89,7 @@ func (rd *DoT)Resolve(remoteHost string) (string,error){
 			record, isType := v.(*dns.A)
 			if isType {
 				ip=record.A.String();
-				writeDnsCache(remoteHost,ip);
+				dnsCache.WriteDnsCache(remoteHost,record.Hdr.Ttl,ip);
 				break;
 			}
 		}
@@ -96,26 +97,3 @@ func (rd *DoT)Resolve(remoteHost string) (string,error){
 	return ip,err;
 }
 
-type DnsCache struct {
-	cache        map[string]string;
-	sync.Mutex
-}
-func readDnsCache(remoteHost string)string{
-	dnsCache.Lock();
-	defer dnsCache.Unlock();
-	if v, ok := dnsCache.cache[remoteHost]; ok {
-		cache:=strings.Split(v,"_")
-		cacheTime, _ := strconv.ParseInt(cache[1], 10, 64)
-		//60ms
-		if time.Now().Unix()-cacheTime<3*60 {
-			return cache[0];
-		}
-	}
-	return "";
-}
-func writeDnsCache(remoteHost string,ip string)string{
-	dnsCache.Lock();
-	defer dnsCache.Unlock();
-	dnsCache.cache[remoteHost]=ip+"_"+strconv.FormatInt(time.Now().Unix(),10)
-	return "";
-}

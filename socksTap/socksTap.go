@@ -1,11 +1,13 @@
 package socksTap
 
 import (
+	"errors"
 	"fmt"
 	"github.com/miekg/dns"
 	"github.com/vishalkuo/bimap"
 	"goSocksTap/comm"
 	"goSocksTap/comm/dot"
+	"goSocksTap/comm/netstat"
 	"goSocksTap/comm/socks"
 	"goSocksTap/comm/tun2socks"
 	"goSocksTap/winDivert"
@@ -24,12 +26,19 @@ import (
 )
 
 
+var dnsCache *comm.DnsCache
+
+func init(){
+	dnsCache = &comm.DnsCache{Cache: make(map[string]string, 128)}
+}
 type SocksTap struct {
 	localSocks string;
 	udpLimit sync.Map;
 	run bool;
 	tunDns *TunDns
 	safeDns *dot.DoT
+	socksServerPid int
+	autoFilter bool
 	tunDev io.ReadWriteCloser
 }
 
@@ -57,7 +66,7 @@ var fakeUdpNat sync.Map
 
 func (fakeDns *SocksTap)Start(localSocks string,excludeDomain string) {
 	fakeDns.localSocks=localSocks;
-
+	fakeDns.socksServerPid,_=netstat.PortGetPid(localSocks)
 
 	fakeDns.safeDns=&dot.DoT{};
 	fakeDns.safeDns.ServerName="dns.google";
@@ -93,7 +102,7 @@ func (fakeDns *SocksTap)Start(localSocks string,excludeDomain string) {
 	}
 	//udp limit auto remove
 	fakeDns.run=true;
-	go fakeDns.autoFree();
+	go fakeDns.task();
 }
 
 func (fakeDns *SocksTap)Shutdown(){
@@ -127,7 +136,7 @@ func (fakeDns *SocksTap) _startTun(mtu int) (error){
 	go tun2socks.ForwardTransportFromIo(fakeDns.tunDev,mtu,fakeDns.tcpForwarder,fakeDns.udpForwarder);
 	return nil;
 }
-func (fakeDns *SocksTap) autoFree(){
+func (fakeDns *SocksTap) task(){
 	for fakeDns.run{
 		fakeDns.udpLimit.Range(func(k, v interface{}) bool {
 			_v:=v.(*comm.UdpLimit);
@@ -136,6 +145,10 @@ func (fakeDns *SocksTap) autoFree(){
 			}
 			return true
 		})
+		pid,err:=netstat.PortGetPid(fakeDns.localSocks)
+		if err==nil &&pid>0 {
+			fakeDns.socksServerPid=pid;
+		}
 		time.Sleep(time.Second*30);
 	}
 }
@@ -146,17 +159,27 @@ func (fakeDns *SocksTap) tcpForwarder(conn *gonet.TCPConn)error{
 	var addrType =0x01;
 	remoteAddr = fakeDns.dnsToAddr(srcAddr)
 	if remoteAddr==""{
+		fmt.Printf("remoteAddr:%s srcAddr:%s\r\n",remoteAddr,srcAddr)
 		conn.Close();
 		return nil;
 	}
-	socksConn,err1:= net.DialTimeout("tcp",fakeDns.localSocks,time.Second*15)
-	if err1 != nil {
-		log.Printf("err:%v",err1)
-		return nil
-	}
-	defer socksConn.Close();
-	if socks.SocksCmd(socksConn,1, uint8(addrType),remoteAddr)==nil {
-		comm.TcpPipe(conn,socksConn,time.Minute*5)
+	if netstat.IsSocksServerAddr(fakeDns.socksServerPid,strings.Split(srcAddr,":")[0]) && fakeDns.autoFilter {
+		socksConn, err:= net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
+		if err != nil {
+			log.Printf("err:%v", err)
+			return nil
+		}
+		comm.TcpPipe(conn, socksConn, time.Minute*5)
+	}else {
+		socksConn, err := net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
+		if err != nil {
+			log.Printf("err:%v", err)
+			return nil
+		}
+		defer socksConn.Close();
+		if socks.SocksCmd(socksConn, 1, uint8(addrType), remoteAddr) == nil {
+			comm.TcpPipe(conn, socksConn, time.Minute*5)
+		}
 	}
 	return nil
 }
@@ -190,7 +213,7 @@ func (fakeDns *SocksTap) udpForwarder(conn *gonet.UDPConn, ep tcpip.Endpoint)err
 
 
 
-/*dns addr swap*/
+
 /*dns addr swap*/
 func (fakeDns *SocksTap) dnsToAddr(remoteAddr string) string{
 	if fakeDns.tunDns==nil {
@@ -208,7 +231,6 @@ func (fakeDns *SocksTap) dnsToAddr(remoteAddr string) string{
 	}
 	return ip+":"+remoteAddrs[1]
 }
-
 
 
 func (tunDns *TunDns)_startSmartDns(clientPort string)  {
@@ -263,7 +285,7 @@ func (tunDns *TunDns) doIPv4Query(r *dns.Msg) (*dns.Msg, error) {
 	m.Authoritative = false
 	domain := r.Question[0].Name
 	v, _, _ := tunDns.singleflight.Do(domain, func() (interface{}, error) {
-		return tunDns.ipv4Res(domain,nil,r);
+		return tunDns.ipv4Res(domain,r);
 	})
 	m.Answer =v.( []dns.RR )
 	// final
@@ -296,7 +318,8 @@ func  (tunDns *TunDns)ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 
 /*ipv4智能响应*/
-func (tunDns *TunDns)ipv4Res(domain string,_ip  net.IP,r *dns.Msg) ([]dns.RR,error) {
+func (tunDns *TunDns)ipv4Res(domain string,r *dns.Msg) ([]dns.RR,error) {
+	var _ip  net.IP;
 	var ip ="";
 	var ipTtl uint32=60;
 	var dnsErr=false;
@@ -308,19 +331,9 @@ func (tunDns *TunDns)ipv4Res(domain string,_ip  net.IP,r *dns.Msg) ([]dns.RR,err
 		if _ip==nil && r!=nil  {
 			//为空的话智能dns的话先解析一遍
 			if tunDns.smartDns==1  {
-				m1,_,err := tunDns.dnsClient.ExchangeWithConn(r,tunDns.dnsClientConn)
+				m1,_,err := tunDns.localResolve(r)
 				if err == nil {
-					for _, v := range m1.Answer {
-						record, isType := v.(*dns.A)
-						if isType {
-							//有些dns会返回127.0.0.1
-							if record.A.String()!="127.0.0.1" {
-								_ip=record.A;
-								ipTtl=record.Hdr.Ttl;
-								break;
-							}
-						}
-					}
+					_ip=m1;
 				}else{
 					fmt.Printf("local dns error:%v\r\n",err)
 					oldDns:=comm.GetUseDns(tunDns.dnsAddr, tunGW,"");
@@ -351,6 +364,7 @@ func (tunDns *TunDns)ipv4Res(domain string,_ip  net.IP,r *dns.Msg) ([]dns.RR,err
 				_, ok := tunDns.ip2Domain.Get(ip)
 				if !ok && ip!= tunAddr {
 					ipTtl=1;
+					fmt.Printf("insert ip2Domain\r\n");
 					tunDns.ip2Domain.Insert(ip, domain)
 					break;
 				} else {
@@ -360,7 +374,7 @@ func (tunDns *TunDns)ipv4Res(domain string,_ip  net.IP,r *dns.Msg) ([]dns.RR,err
 			}
 		}
 	}
-	fmt.Printf("domain:%s ip:%s\r\n",domain,ip)
+	fmt.Printf("domain:%s ip:%s srcIp:%s\r\n",domain,ip, _ip.String())
 	return []dns.RR{&dns.A{
 		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: ipTtl},
 		A:   net.ParseIP(ip),
@@ -381,4 +395,27 @@ func  (tunDns *TunDns)resolve(r *dns.Msg) (*dns.Msg, error) {
 	return m, err;
 }
 
+/*本地dns解析有缓存*/
+func  (tunDns *TunDns)localResolve(r *dns.Msg) (net.IP,uint32, error) {
+	domain := r.Question[0].Name
+	cache,ttl:= dnsCache.ReadDnsCache(domain)
+	if cache!="" {
+		return net.ParseIP(cache), ttl,nil;
+	}
+
+	m1,_,err := tunDns.dnsClient.ExchangeWithConn(r,tunDns.dnsClientConn)
+	if err == nil {
+		for _, v := range m1.Answer {
+			record, isType := v.(*dns.A)
+			if isType {
+				//有些dns会返回127.0.0.1
+				if record.A.String() != "127.0.0.1" {
+					dnsCache.WriteDnsCache(domain,record.Hdr.Ttl,record.A.String())
+					return  record.A, record.Hdr.Ttl,nil;
+				}
+			}
+		}
+	}
+	return nil,0,errors.New("error")
+}
 

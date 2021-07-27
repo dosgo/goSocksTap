@@ -16,7 +16,7 @@ var (
 	gChinaMainlandRange cidranger.Ranger
 )
 
-func Init(){
+func init(){
 	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
 	name := "iptable.txt"
 	if err==nil&&runtime.GOOS!="windows" {
