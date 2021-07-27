@@ -66,6 +66,7 @@ var fakeUdpNat sync.Map
 
 func (fakeDns *SocksTap)Start(localSocks string,excludeDomain string) {
 	fakeDns.localSocks=localSocks;
+	fakeDns.autoFilter=true;
 	fakeDns.socksServerPid,_=netstat.PortGetPid(localSocks)
 
 	fakeDns.safeDns=&dot.DoT{};
@@ -164,7 +165,7 @@ func (fakeDns *SocksTap) tcpForwarder(conn *gonet.TCPConn)error{
 		return nil;
 	}
 	if netstat.IsSocksServerAddr(fakeDns.socksServerPid,strings.Split(srcAddr,":")[0]) && fakeDns.autoFilter {
-		socksConn, err:= net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
+		socksConn, err:= net.DialTimeout("tcp", remoteAddr, time.Second*15)
 		if err != nil {
 			log.Printf("err:%v", err)
 			return nil
