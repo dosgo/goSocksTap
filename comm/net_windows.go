@@ -8,8 +8,11 @@ import (
 	routetable "github.com/yijunjun/route-table"
 	"log"
 	"net"
+	"os"
 	"os/exec"
 	"syscall"
+	"fmt"
+	"unsafe"
 )
 
 
@@ -130,3 +133,51 @@ func CmdHide(name string, arg ...string) *exec.Cmd{
 
 
 
+func getAdapterList() (*syscall.IpAdapterInfo, error) {
+	b := make([]byte, 1000)
+	l := uint32(len(b))
+	a := (*syscall.IpAdapterInfo)(unsafe.Pointer(&b[0]))
+	err := syscall.GetAdaptersInfo(a, &l)
+	if err == syscall.ERROR_BUFFER_OVERFLOW {
+		b = make([]byte, l)
+		a = (*syscall.IpAdapterInfo)(unsafe.Pointer(&b[0]))
+		err = syscall.GetAdaptersInfo(a, &l)
+	}
+	if err != nil {
+		return nil, os.NewSyscallError("GetAdaptersInfo", err)
+	}
+	return a, nil
+}
+
+func GetLocalAddresses() ([]lAddr ,error) {
+	lAddrs := []lAddr{}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil,err
+	}
+
+	aList, err := getAdapterList()
+	if err != nil {
+		return nil,err
+	}
+
+
+	for _, ifi := range ifaces {
+		for ai := aList; ai != nil; ai = ai.Next {
+			index := ai.Index
+			if ifi.Index == int(index) {
+				ipl := &ai.IpAddressList
+				gwl := &ai.GatewayList
+				for ; ipl != nil; ipl = ipl.Next  {
+					itemAddr := lAddr{}
+					itemAddr.Name=ifi.Name
+					itemAddr.IpAddress=fmt.Sprintf("%s",ipl.IpAddress.String)
+					itemAddr.IpMask=fmt.Sprintf("%s",ipl.IpMask.String)
+					itemAddr.GateWay=fmt.Sprintf("%s",gwl.IpAddress.String)
+					lAddrs=append(lAddrs,itemAddr)
+				}
+			}
+		}
+	}
+	return lAddrs,err
+}

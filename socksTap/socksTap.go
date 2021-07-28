@@ -7,7 +7,7 @@ import (
 	"github.com/vishalkuo/bimap"
 	"goSocksTap/comm"
 	"goSocksTap/comm/dot"
-	"goSocksTap/comm/netstat"
+	"goSocksTap/comm/Iphlpapi"
 	"goSocksTap/comm/socks"
 	"goSocksTap/comm/tun2socks"
 	"goSocksTap/winDivert"
@@ -65,8 +65,10 @@ var fakeUdpNat sync.Map
 
 func (fakeDns *SocksTap)Start(localSocks string,excludeDomain string,autoFilter bool) {
 	fakeDns.localSocks=localSocks;
-	fakeDns.autoFilter=autoFilter;
-	fakeDns.socksServerPid,_=netstat.PortGetPid(localSocks)
+	if runtime.GOOS=="windows" {
+		fakeDns.autoFilter=autoFilter;
+		fakeDns.socksServerPid, _ = Iphlpapi.PortGetPid(localSocks)
+	}
 
 	fakeDns.safeDns= &dot.DoT{ServerName:"dns.google",Addr:"8.8.8.8:853",LSocks:localSocks}
 	fakeDns.safeDns.Connect();
@@ -134,9 +136,11 @@ func (fakeDns *SocksTap) task(){
 			}
 			return true
 		})
-		pid,err:=netstat.PortGetPid(fakeDns.localSocks)
-		if err==nil &&pid>0 {
-			fakeDns.socksServerPid=pid;
+		if runtime.GOOS=="windows" {
+			pid, err := Iphlpapi.PortGetPid(fakeDns.localSocks)
+			if err == nil && pid > 0 {
+				fakeDns.socksServerPid = pid;
+			}
 		}
 		time.Sleep(time.Second*30);
 	}
@@ -148,7 +152,7 @@ func (fakeDns *SocksTap) tcpForwarder(conn *gonet.TCPConn)error{
 	var remoteAddr="";
 	var addrType =0x01;
 	defer  conn.Close();
-	if netstat.IsSocksServerAddr(fakeDns.socksServerPid,srcAddrs[0]) && fakeDns.autoFilter {
+	if Iphlpapi.IsSocksServerAddr(fakeDns.socksServerPid,srcAddrs[0]) && fakeDns.autoFilter {
 		domain := fakeDns.dnsToDomain(srcAddr)
 		domains:=strings.Split(domain,":")
 		fmt.Printf("IsSocksServerAddr:%d  addr:%s domain:%s\r\n",fakeDns.socksServerPid,srcAddrs[0],domains[0])

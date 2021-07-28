@@ -1,4 +1,7 @@
-package netstat
+// +build windows
+
+
+package Iphlpapi
 
 import (
 	"github.com/cakturk/go-netstat/netstat"
@@ -53,33 +56,6 @@ func GetUdpAddrByPid(pid int)error{
 	return nil;
 }
 
-func GetTcpAddrByPid(pid int)([]netstat.SockTabEntry,error){
-	tbl, err := netstat.GetTCPTable2(true)
-	if err != nil {
-		return  nil,err
-	}
-	snp, err := netstat.CreateToolhelp32Snapshot(netstat.Th32csSnapProcess, 0)
-	defer 	snp.Close();
-	if err != nil {
-		return  nil,err
-	}
-	s := tbl.Rows()
-	var sktab []netstat.SockTabEntry
-	for i := range s {
-		ent:= netstat.SockTabEntry{
-			LocalAddr:  s[i].LocalSock(),
-			RemoteAddr: s[i].RemoteSock(),
-			State:      s[i].SockState(),
-		}
-		if ent.State == netstat.Established  || ent.State == netstat.FinWait1 ||ent.State == netstat.FinWait2 || ent.State == netstat.SynSent {
-			process:=s[i].Process(snp);
-			if process!=nil  && process.Pid==pid  {
-				sktab=append(sktab,ent);
-			}
-		}
-	}
-	return sktab,nil;
-}
 
 func IsSocksServerAddr(pid int,addr string)bool{
 	tbl, err := netstat.GetTCPTable2(true)
