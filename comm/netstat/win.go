@@ -1,13 +1,11 @@
 // +build windows
 
-
-package Iphlpapi
+package netstat
 
 import (
 	"github.com/cakturk/go-netstat/netstat"
 	"strconv"
 	"strings"
-	"fmt"
 )
 
 /*为啥要用这方法,因为Process在一些电脑比较耗时间只有匹配的才获取*/
@@ -38,22 +36,6 @@ func PortGetPid(lSocks string) (int,error) {
 	}
 	snp.Close()
 	return 0, nil;
-}
-
-
-func GetUdpAddrByPid(pid int)error{
-	// UDP sockets
-	udpSocks, err := netstat.UDPSocks(func(s *netstat.SockTabEntry) bool {
-		return s.Process.Pid==pid
-	})
-	if err != nil {
-		return err
-	}
-	fmt.Printf("udpSocks:%+v\r\n",udpSocks)
-	for _, e := range udpSocks {
-		fmt.Printf("LocalAddr:%s State:%s\n", e.LocalAddr, e.State)
-	}
-	return nil;
 }
 
 
