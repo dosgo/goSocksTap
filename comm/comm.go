@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"fmt"
@@ -294,4 +295,13 @@ func getAdapterList() (*syscall.IpAdapterInfo, error) {
 		return nil, os.NewSyscallError("GetAdaptersInfo", err)
 	}
 	return a, nil
+}
+
+func ArrMatch(target string, str_array []string) bool {
+	sort.Strings(str_array)
+	index := sort.SearchStrings(str_array, target)
+	if index < len(str_array) && str_array[index] == target {
+		return true
+	}
+	return false
 }

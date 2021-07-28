@@ -15,10 +15,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 	"gvisor.dev/gvisor/pkg/waiter"
 	"log"
-
-	//"github.com/google/netstack/tcpip/adapters/gonet"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
-	//"github.com/google/netstack/tcpip/buffer"
 	"net"
 	"time"
 )

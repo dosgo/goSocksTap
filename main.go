@@ -1,10 +1,7 @@
 package main
 
 import (
-	"goSocksTap/comm/netstat"
 	"goSocksTap/socksTap"
-	_ "goSocksTap/socksTap"
-	"time"
 )
 
 
@@ -12,11 +9,9 @@ import (
 func main(){
 
 	var _socksTap= socksTap.SocksTap{};
-	_socksTap.Start("127.0.0.1:10808","")
-	pid,_:=netstat.PortGetPid("127.0.0.1:10808");
+	_socksTap.Start("127.0.0.1:10808","",false)
 
-	for{
-		netstat.GetTcpAddrByPid(pid)
-		time.Sleep(time.Second*30);
+	select {
+
 	}
 }

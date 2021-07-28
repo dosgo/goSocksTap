@@ -45,11 +45,10 @@ type SocksTap struct {
 type TunDns struct {
 	dnsClient *dns.Client
 	dnsClientConn *dns.Conn
-	safeDnsClient *dns.Client
 	udpServer  *dns.Server
 	tcpServer  *dns.Server
 	smartDns int;
-	excludeDomain string
+	excludeDomains []string
 	dnsAddr string;
 	dnsAddrV6 string;
 	dnsPort string;
@@ -64,29 +63,21 @@ var tunMask="255.255.0.0"
 var fakeUdpNat sync.Map
 
 
-func (fakeDns *SocksTap)Start(localSocks string,excludeDomain string) {
+func (fakeDns *SocksTap)Start(localSocks string,excludeDomain string,autoFilter bool) {
 	fakeDns.localSocks=localSocks;
-	fakeDns.autoFilter=true;
+	fakeDns.autoFilter=autoFilter;
 	fakeDns.socksServerPid,_=netstat.PortGetPid(localSocks)
 
-	fakeDns.safeDns=&dot.DoT{};
-	fakeDns.safeDns.ServerName="dns.google";
-	fakeDns.safeDns.Addr="8.8.8.8:853";
-	fakeDns.safeDns.LSocks=localSocks;
+	fakeDns.safeDns= &dot.DoT{ServerName:"dns.google",Addr:"8.8.8.8:853",LSocks:localSocks}
 	fakeDns.safeDns.Connect();
 
 	//start local dns
-	fakeDns.tunDns =&TunDns{};
-	fakeDns.tunDns.smartDns=1;
-	fakeDns.tunDns.dnsPort="53";
-	fakeDns.tunDns.dnsAddr="127.0.0.1"
-	fakeDns.tunDns.dnsAddrV6="0:0:0:0:0:0:0:1"
+	fakeDns.tunDns =&TunDns{smartDns:1,dnsPort:"53",dnsAddr:"127.0.0.1",dnsAddrV6:"0:0:0:0:0:0:0:1"};
 	fakeDns.tunDns.ip2Domain= bimap.NewBiMap()
 	fakeDns.tunDns.singleflight  = &singleflight.Group{}
-	if excludeDomain=="" {
-		fakeDns.tunDns.excludeDomain ="localhost";
-	}else {
-		fakeDns.tunDns.excludeDomain = excludeDomain
+	fakeDns.tunDns.excludeDomains=make([]string,0)
+	if excludeDomain!="" {
+		fakeDns.tunDns.excludeDomains=append(fakeDns.tunDns.excludeDomains,excludeDomain+".")
 	}
 
 	//生成本地udp端口避免过滤的时候变动了
@@ -121,15 +112,12 @@ func (fakeDns *SocksTap)Shutdown(){
 
 
 func (fakeDns *SocksTap) _startTun(mtu int) (error){
-
 	tunAddr, tunGW = comm.GetUnusedTunAddr();
-
 	var err error
 	fakeDns.tunDev, err = comm.RegTunDev("",tunAddr,tunMask,tunGW,"")
 	if err != nil {
 		return err;
 	}
-
 	go func() {
 		time.Sleep(time.Second*1)
 		comm.AddRoute(tunAddr, tunGW, tunMask)
@@ -156,22 +144,39 @@ func (fakeDns *SocksTap) task(){
 
 func (fakeDns *SocksTap) tcpForwarder(conn *gonet.TCPConn)error{
 	var srcAddr=conn.LocalAddr().String();
+	var srcAddrs=strings.Split(srcAddr,":")
 	var remoteAddr="";
 	var addrType =0x01;
-	remoteAddr = fakeDns.dnsToAddr(srcAddr)
-	if remoteAddr==""{
-		fmt.Printf("remoteAddr:%s srcAddr:%s\r\n",remoteAddr,srcAddr)
-		conn.Close();
-		return nil;
-	}
-	if netstat.IsSocksServerAddr(fakeDns.socksServerPid,strings.Split(srcAddr,":")[0]) && fakeDns.autoFilter {
-		socksConn, err:= net.DialTimeout("tcp", remoteAddr, time.Second*15)
+	defer  conn.Close();
+	if netstat.IsSocksServerAddr(fakeDns.socksServerPid,srcAddrs[0]) && fakeDns.autoFilter {
+		domain := fakeDns.dnsToDomain(srcAddr)
+		domains:=strings.Split(domain,":")
+		fmt.Printf("IsSocksServerAddr:%d  addr:%s domain:%s\r\n",fakeDns.socksServerPid,srcAddrs[0],domains[0])
+		if domain==""{
+			fmt.Printf("dnsToDomain domain:%s srcAddr:%s\r\n",domain,srcAddr)
+			return nil;
+		}
+		//add exclude  domain
+		fakeDns.tunDns.excludeDomains=append(fakeDns.tunDns.excludeDomains,domains[0])
+		query := &dns.Msg{}
+		query.SetQuestion(domains[0], dns.TypeA)
+		ip,_,err:=fakeDns.tunDns.localResolve(query)
+		if err!=nil{
+			fmt.Printf("domain:%s  srcAddr:%s localResolve err:%s\r\n",domains[0],srcAddr,err)
+			return nil;
+		}
+		socksConn, err:= net.DialTimeout("tcp", ip.String()+":"+srcAddrs[1], time.Second*15)
 		if err != nil {
-			log.Printf("err:%v", err)
 			return nil
 		}
+		defer socksConn.Close();
 		comm.TcpPipe(conn, socksConn, time.Minute*5)
 	}else {
+		remoteAddr = fakeDns.dnsToAddr(srcAddr)
+		if remoteAddr==""{
+			fmt.Printf("remoteAddr:%s srcAddr:%s\r\n",remoteAddr,srcAddr)
+			return nil;
+		}
 		socksConn, err := net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
 		if err != nil {
 			log.Printf("err:%v", err)
@@ -217,6 +222,22 @@ func (fakeDns *SocksTap) udpForwarder(conn *gonet.UDPConn, ep tcpip.Endpoint)err
 
 /*dns addr swap*/
 func (fakeDns *SocksTap) dnsToAddr(remoteAddr string) string{
+	remoteAddr=fakeDns.dnsToDomain(remoteAddr)
+	if remoteAddr=="" {
+		return "";
+	}
+	remoteAddrs:=strings.Split(remoteAddr,":")
+	domain:=remoteAddrs[0]
+	ip, err := fakeDns.safeDns.Resolve(domain[0 : len(domain)-1])
+	if err!=nil{
+		return "";
+	}
+	return ip+":"+remoteAddrs[1]
+}
+
+
+/*dns addr swap*/
+func (fakeDns *SocksTap) dnsToDomain(remoteAddr string) string{
 	if fakeDns.tunDns==nil {
 		return "";
 	}
@@ -225,13 +246,7 @@ func (fakeDns *SocksTap) dnsToAddr(remoteAddr string) string{
 	if !ok{
 		return "";
 	}
-	domain:=_domain.(string)
-	ip, err := fakeDns.safeDns.Resolve(domain[0 : len(domain)-1])
-	if err!=nil{
-		log.Printf("err:%+v\r\n",err)
-		return "";
-	}
-	return ip+":"+remoteAddrs[1]
+	return _domain.(string)+":"+remoteAddrs[1]
 }
 
 
@@ -326,7 +341,7 @@ func (tunDns *TunDns)ipv4Res(domain string,r *dns.Msg) ([]dns.RR,error) {
 	var ipTtl uint32=60;
 	var dnsErr=false;
 	ipLog,ok :=tunDns.ip2Domain.GetInverse(domain)
-	if ok && strings.Index(domain, tunDns.excludeDomain) == -1 && strings.HasPrefix(ipLog.(string), tunAddr[0:4]) {
+	if ok && !comm.ArrMatch(domain,tunDns.excludeDomains) && strings.HasPrefix(ipLog.(string), tunAddr[0:4]) {
 		ip=ipLog.(string);
 		ipTtl=1;
 	}else {
@@ -336,7 +351,7 @@ func (tunDns *TunDns)ipv4Res(domain string,r *dns.Msg) ([]dns.RR,error) {
 				m1,_,err := tunDns.localResolve(r)
 				if err == nil {
 					_ip=m1;
-				}else{
+				}else if err.Error()!="Not found addr" {
 					fmt.Printf("local dns error:%v\r\n",err)
 					oldDns:=comm.GetUseDns(tunDns.dnsAddr, tunGW,"");
 					//检测网关DNS是否改变
@@ -354,19 +369,18 @@ func (tunDns *TunDns)ipv4Res(domain string,r *dns.Msg) ([]dns.RR,error) {
 		}
 
 		//不为空判断是不是中国ip
-		if   strings.Index(domain, tunDns.excludeDomain) != -1|| (_ip!=nil && (comm.IsChinaMainlandIP(_ip.String()) || !comm.IsPublicIP(_ip))) {
+		if   comm.ArrMatch(domain,tunDns.excludeDomains)|| (_ip!=nil && (comm.IsChinaMainlandIP(_ip.String()) || !comm.IsPublicIP(_ip))) {
 			//中国Ip直接回复
 			if _ip!=nil {
 				ip = _ip.String();
 			}
-		} else if strings.Index(domain, tunDns.excludeDomain) == -1 &&!dnsErr {
+		} else if !comm.ArrMatch(domain,tunDns.excludeDomains) &&!dnsErr {
 			//外国随机分配一个代理ip
 			for i := 0; i <= 2; i++ {
 				ip = comm.GetCidrRandIpByNet(tunAddr, tunMask)
 				_, ok := tunDns.ip2Domain.Get(ip)
 				if !ok && ip!= tunAddr {
 					ipTtl=1;
-					fmt.Printf("insert ip2Domain\r\n");
 					tunDns.ip2Domain.Insert(ip, domain)
 					break;
 				} else {
@@ -376,6 +390,8 @@ func (tunDns *TunDns)ipv4Res(domain string,r *dns.Msg) ([]dns.RR,error) {
 			}
 		}
 	}
+
+
 	fmt.Printf("domain:%s ip:%s srcIp:%s\r\n",domain,ip, _ip.String())
 	return []dns.RR{&dns.A{
 		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: ipTtl},
@@ -418,6 +434,6 @@ func  (tunDns *TunDns)localResolve(r *dns.Msg) (net.IP,uint32, error) {
 			}
 		}
 	}
-	return nil,0,errors.New("error")
+	return nil,0,errors.New("Not found addr")
 }
 
