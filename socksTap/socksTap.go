@@ -66,7 +66,11 @@ var fakeUdpNat sync.Map
 func (fakeDns *SocksTap)Start(localSocks string,excludeDomain string,autoFilter bool) {
 	fakeDns.localSocks=localSocks;
 	if runtime.GOOS=="windows" {
-		fakeDns.autoFilter=autoFilter;
+		if excludeDomain=="" {
+			fakeDns.autoFilter=true;
+		}else {
+			fakeDns.autoFilter = autoFilter;
+		}
 		fakeDns.socksServerPid, _ = netstat.PortGetPid(localSocks)
 	}
 
@@ -152,7 +156,7 @@ func (fakeDns *SocksTap) tcpForwarder(conn *gonet.TCPConn)error{
 	var remoteAddr="";
 	var addrType =0x01;
 	defer  conn.Close();
-	if netstat.IsSocksServerAddr(fakeDns.socksServerPid,srcAddrs[0]) && fakeDns.autoFilter {
+	if fakeDns.autoFilter && netstat.IsSocksServerAddr(fakeDns.socksServerPid,srcAddrs[0])  {
 		domain := fakeDns.dnsToDomain(srcAddr)
 		domains:=strings.Split(domain,":")
 		fmt.Printf("IsSocksServerAddr:%d  addr:%s domain:%s\r\n",fakeDns.socksServerPid,srcAddrs[0],domains[0])
@@ -203,6 +207,27 @@ func (fakeDns *SocksTap) udpForwarder(conn *gonet.UDPConn, ep tcpip.Endpoint)err
 		return nil;
 	}
 
+	socksConn, err := net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
+	if err == nil {
+		defer socksConn.Close();
+		gateWay,err:=socks.GetUdpGate(socksConn,remoteAddr);
+		fmt.Printf("gateWay:%s %v\r\n",gateWay,err)
+		if err==nil {
+			defer ep.Close();
+			dstAddr,_:=net.ResolveUDPAddr("udp",remoteAddr)
+			fmt.Printf("udp-remoteAddr:%s\r\n",remoteAddr)
+			socks.SocksUdpGate(conn,gateWay,dstAddr);
+		}else{
+			fakeDns.UdpDirect(remoteAddr,conn,ep);
+		}
+	}else{
+		fakeDns.UdpDirect(remoteAddr,conn,ep);
+	}
+	return nil;
+}
+
+/*直连*/
+func (fakeDns *SocksTap) UdpDirect(remoteAddr string,conn *gonet.UDPConn, ep tcpip.Endpoint ){
 	//tuntype 直连
 	var limit *comm.UdpLimit;
 	_limit,ok:=fakeDns.udpLimit.Load(remoteAddr)
@@ -218,10 +243,7 @@ func (fakeDns *SocksTap) udpForwarder(conn *gonet.UDPConn, ep tcpip.Endpoint)err
 		comm.TunNatSawp(&fakeUdpNat, conn,ep, remoteAddr, 65*time.Second);
 		fakeDns.udpLimit.Store(remoteAddr,limit);
 	}
-	return nil;
 }
-
-
 
 
 /*dns addr swap*/

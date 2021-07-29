@@ -9,7 +9,7 @@ import (
 func main(){
 
 	var _socksTap= socksTap.SocksTap{};
-	_socksTap.Start("127.0.0.1:10808","",false)
+	_socksTap.Start("127.0.0.1:10808","",true)
 
 	select {
 
