@@ -39,6 +39,7 @@ type SocksTap struct {
 	safeDns *dot.DoT
 	socksServerPid int
 	autoFilter bool
+	udpProxy bool;
 	tunDev io.ReadWriteCloser
 }
 
@@ -63,8 +64,9 @@ var tunMask="255.255.0.0"
 var fakeUdpNat sync.Map
 
 
-func (fakeDns *SocksTap)Start(localSocks string,excludeDomain string,autoFilter bool) {
+func (fakeDns *SocksTap)Start(localSocks string,excludeDomain string,autoFilter bool,udpProxy bool) {
 	fakeDns.localSocks=localSocks;
+	fakeDns.udpProxy = udpProxy;
 	if runtime.GOOS=="windows" {
 		if excludeDomain=="" {
 			fakeDns.autoFilter=true;
@@ -206,23 +208,21 @@ func (fakeDns *SocksTap) udpForwarder(conn *gonet.UDPConn, ep tcpip.Endpoint)err
 		conn.Close();
 		return nil;
 	}
-
-	socksConn, err := net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
-	if err == nil {
-		defer socksConn.Close();
-		gateWay,err:=socks.GetUdpGate(socksConn,remoteAddr);
-		fmt.Printf("gateWay:%s %v\r\n",gateWay,err)
-		if err==nil {
-			defer ep.Close();
-			dstAddr,_:=net.ResolveUDPAddr("udp",remoteAddr)
-			fmt.Printf("udp-remoteAddr:%s\r\n",remoteAddr)
-			socks.SocksUdpGate(conn,gateWay,dstAddr);
-		}else{
-			fakeDns.UdpDirect(remoteAddr,conn,ep);
+	if fakeDns.udpProxy {
+		socksConn, err := net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
+		if err == nil {
+			defer socksConn.Close();
+			gateWay, err := socks.GetUdpGate(socksConn, remoteAddr);
+			fmt.Printf("gateWay:%s %v\r\n", gateWay, err)
+			if err == nil {
+				defer ep.Close();
+				dstAddr, _ := net.ResolveUDPAddr("udp", remoteAddr)
+				fmt.Printf("udp-remoteAddr:%s\r\n", remoteAddr)
+				return socks.SocksUdpGate(conn, gateWay, dstAddr);
+			}
 		}
-	}else{
-		fakeDns.UdpDirect(remoteAddr,conn,ep);
 	}
+	fakeDns.UdpDirect(remoteAddr, conn, ep);
 	return nil;
 }
 
