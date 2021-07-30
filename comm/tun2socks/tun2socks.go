@@ -34,7 +34,7 @@ func ForwardTransportFromIo(dev io.ReadWriteCloser,mtu int,tcpCallback netstack.
 			//buffer.Write(pkt.Pkt.LinkHeader().View())
 			sendBuffer.Write(info.Pkt.NetworkHeader().View())
 			sendBuffer.Write(info.Pkt.TransportHeader().View())
-			sendBuffer.Write(info.Pkt.Data.ToView())
+			sendBuffer.Write(info.Pkt.Data().AsRange().ToOwnedView())
 			if sendBuffer.Len()>0 {
 				dev.Write(sendBuffer.Bytes())
 			}
