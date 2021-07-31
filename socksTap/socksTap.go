@@ -9,6 +9,7 @@ import (
 	"goSocksTap/comm/dot"
 	"goSocksTap/comm/netstat"
 	"goSocksTap/comm/socks"
+	"goSocksTap/comm/tun"
 	"goSocksTap/comm/tun2socks"
 	"goSocksTap/winDivert"
 	"golang.org/x/sync/singleflight"
@@ -122,7 +123,7 @@ func (fakeDns *SocksTap)Shutdown(){
 func (fakeDns *SocksTap) _startTun(mtu int) (error){
 	tunAddr, tunGW = comm.GetUnusedTunAddr();
 	var err error
-	fakeDns.tunDev, err = comm.RegTunDev("",tunAddr,tunMask,tunGW,"")
+	fakeDns.tunDev, err = tun.RegTunDev("goSocksTap",tunAddr,tunMask,tunGW,"")
 	if err != nil {
 		return err;
 	}
