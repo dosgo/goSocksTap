@@ -366,6 +366,7 @@ func (tunDns *TunDns) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		break
 	}
 	if err != nil {
+		msg = &dns.Msg{}
 		msg.SetRcode(r, dns.RcodeServerFailure)
 	}
 	w.WriteMsg(msg)
