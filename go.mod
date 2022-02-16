@@ -14,9 +14,9 @@ require (
 	github.com/yl2chen/cidranger v1.0.2
 	golang.org/x/crypto v0.0.0-20210616213533-5ff15b29337e
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20210616094352-59db8d763f22
+	golang.org/x/sys v0.0.0-20211019181941-9d821ace8654
 	golang.org/x/time v0.0.0-20201208040808-7e3f01d25324
 	golang.zx2c4.com/wireguard v0.0.0-20210728232740-bad6caeb82ed
 	golang.zx2c4.com/wireguard/windows v0.3.16
-	gvisor.dev/gvisor v0.0.0-20210716193733-566c23a60eea
+	gvisor.dev/gvisor v0.0.0-20220214215919-2394c1fdd0c3
 )
