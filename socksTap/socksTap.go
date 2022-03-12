@@ -81,7 +81,7 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilt
 	fakeDns.safeDns.Connect()
 
 	//start local dns
-	fakeDns.tunDns = &TunDns{smartDns: 1, dnsPort: "53", dnsAddr: "127.0.0.1", dnsAddrV6: "0:0:0:0:0:0:0:1"}
+	fakeDns.tunDns = &TunDns{smartDns: 1, dnsPort: "653", dnsAddr: "127.0.0.1", dnsAddrV6: "0:0:0:0:0:0:0:1"}
 	fakeDns.tunDns.ip2Domain = bimap.NewBiMap()
 	fakeDns.tunDns.singleflight = &singleflight.Group{}
 	fakeDns.tunDns.excludeDomains = make([]string, 0)

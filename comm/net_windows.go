@@ -1,190 +1,181 @@
+//go:build windows
 // +build windows
 
 package comm
 
 import (
-	"github.com/StackExchange/wmi"
-	"github.com/songgao/water"
-	routetable "github.com/yijunjun/route-table"
+	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/exec"
 	"syscall"
-	"fmt"
 	"unsafe"
+
+	"github.com/StackExchange/wmi"
+	"github.com/songgao/water"
+	routetable "github.com/yijunjun/route-table"
 )
 
-
-func GetGateway()string {
+func GetGateway() string {
 	table, err := routetable.NewRouteTable()
 	if err != nil {
-		return "";
+		return ""
 	}
 	defer table.Close()
 	rows, err := table.Routes()
 	if err != nil {
-		return "";
+		return ""
 	}
-	var minMetric uint32=0;
-	var gwIp="";
+	var minMetric uint32 = 0
+	var gwIp = ""
 	for _, row := range rows {
-		if routetable.Inet_ntoa(row.ForwardDest, false)=="0.0.0.0" {
+		if routetable.Inet_ntoa(row.ForwardDest, false) == "0.0.0.0" {
 
-			if minMetric==0 {
-				minMetric=row.ForwardMetric1;
-				gwIp=routetable.Inet_ntoa(row.ForwardNextHop, false);
-			}else{
-				if row.ForwardMetric1<minMetric {
-					minMetric=row.ForwardMetric1;
-					gwIp=routetable.Inet_ntoa(row.ForwardNextHop, false);
+			if minMetric == 0 {
+				minMetric = row.ForwardMetric1
+				gwIp = routetable.Inet_ntoa(row.ForwardNextHop, false)
+			} else {
+				if row.ForwardMetric1 < minMetric {
+					minMetric = row.ForwardMetric1
+					gwIp = routetable.Inet_ntoa(row.ForwardNextHop, false)
 				}
 			}
 		}
 	}
-	return gwIp;
+	return gwIp
 }
-
-
 
 /*获取旧的dns,内网解析用*/
-func GetUseDns(dnsAddr string,tunGW string,_tunGW string) string{
-	ifIndex:=GetGatewayIndex();
-	dnsServers,_,_:=GetDnsServerByIfIndex(ifIndex);
-	for _,v:=range dnsServers{
-		if v!=dnsAddr&&v!=tunGW && v!=_tunGW  {
-			return v;
-			break;
+func GetUseDns(dnsAddr string, tunGW string, _tunGW string) string {
+	ifIndex := GetGatewayIndex()
+	dnsServers, _, _ := GetDnsServerByIfIndex(ifIndex)
+	for _, v := range dnsServers {
+		if v != dnsAddr && v != tunGW && v != _tunGW {
+			return v
+			break
 		}
 	}
-	return "114.114.114.114";
+	return "114.114.114.114"
 }
 
-
-
-func GetDnsServerByIfIndex(ifIndex uint32)([]string,bool,bool){
+func GetDnsServerByIfIndex(ifIndex uint32) ([]string, bool, bool) {
 	//DNSServerSearchOrder
-	adapters,err:=GetNetworkAdapter()
-	var isIpv6=false;
-	if err!=nil {
-		return nil,false,isIpv6;
+	adapters, err := GetNetworkAdapter()
+	var isIpv6 = false
+	if err != nil {
+		return nil, false, isIpv6
 	}
-	for _,v:=range adapters{
-		if v.InterfaceIndex==ifIndex {
-			for _,v2:=range v.IPAddress{
-				if len(v2)>16{
-					isIpv6=true;
-					break;
+	for _, v := range adapters {
+		if v.InterfaceIndex == ifIndex {
+			for _, v2 := range v.IPAddress {
+				if len(v2) > 16 {
+					isIpv6 = true
+					break
 				}
 			}
-			return v.DNSServerSearchOrder,v.DHCPEnabled,isIpv6;
+			return v.DNSServerSearchOrder, v.DHCPEnabled, isIpv6
 		}
 	}
-	return nil,false,isIpv6;
+	return nil, false, isIpv6
 }
 
-
-
-func GetGatewayIndex()uint32 {
+func GetGatewayIndex() uint32 {
 	table, err := routetable.NewRouteTable()
 	if err != nil {
-		return 0;
+		return 0
 	}
 	defer table.Close()
 	rows, err := table.Routes()
 	if err != nil {
-		return 0;
+		return 0
 	}
-	var minMetric uint32=0;
-	var ifIndex uint32=0;
+	var minMetric uint32 = 0
+	var ifIndex uint32 = 0
+	var forwardMask uint32 = 0
 	for _, row := range rows {
-		if routetable.Inet_ntoa(row.ForwardDest, false)=="0.0.0.0" {
-			if minMetric==0 {
-				minMetric=row.ForwardMetric1;
-				ifIndex= row.ForwardIfIndex;
-			}else{
-				if row.ForwardMetric1<minMetric {
-					minMetric=row.ForwardMetric1;
-					ifIndex=row.ForwardIfIndex;
+		if routetable.Inet_ntoa(row.ForwardDest, false) == "0.0.0.0" {
+			if minMetric == 0 {
+				minMetric = row.ForwardMetric1
+				ifIndex = row.ForwardIfIndex
+			} else {
+				if row.ForwardMetric1 < minMetric || row.ForwardMask > forwardMask {
+					minMetric = row.ForwardMetric1
+					ifIndex = row.ForwardIfIndex
 				}
 			}
 		}
 	}
-	return ifIndex;
+	return ifIndex
 }
 
-func GetDnsServerByGateWay(gwIp string)([]string,bool,bool){
+func GetDnsServerByGateWay(gwIp string) ([]string, bool, bool) {
 	//DNSServerSearchOrder
-	adapters,err:=GetNetworkAdapter()
-	var isIpv6=false;
-	if err!=nil {
-		return nil,false,isIpv6;
+	adapters, err := GetNetworkAdapter()
+	var isIpv6 = false
+	if err != nil {
+		return nil, false, isIpv6
 	}
-	for _,v:=range adapters{
-		if len(v.DefaultIPGateway)>0&&v.DefaultIPGateway[0]==gwIp {
-			for _,v2:=range v.IPAddress{
-				if len(v2)>16{
-					isIpv6=true;
-					break;
+	for _, v := range adapters {
+		if len(v.DefaultIPGateway) > 0 && v.DefaultIPGateway[0] == gwIp {
+			for _, v2 := range v.IPAddress {
+				if len(v2) > 16 {
+					isIpv6 = true
+					break
 				}
 			}
-			return v.DNSServerSearchOrder,v.DHCPEnabled,isIpv6;
+			return v.DNSServerSearchOrder, v.DHCPEnabled, isIpv6
 		}
 	}
-	return nil,false,isIpv6;
+	return nil, false, isIpv6
 }
-
 
 type NetworkAdapter struct {
-	DNSServerSearchOrder   []string
-	DefaultIPGateway []string
-	IPAddress []string
-	Caption    string
-	DHCPEnabled  bool
-	InterfaceIndex uint32
-	ServiceName  string
-	IPSubnet   []string
-	SettingID string
+	DNSServerSearchOrder []string
+	DefaultIPGateway     []string
+	IPAddress            []string
+	Caption              string
+	DHCPEnabled          bool
+	InterfaceIndex       uint32
+	ServiceName          string
+	IPSubnet             []string
+	SettingID            string
 }
 
-func GetWaterConf(tunAddr string,tunMask string)water.Config{
-	masks:=net.ParseIP(tunMask).To4();
-	maskAddr:=net.IPNet{IP: net.ParseIP(tunAddr), Mask: net.IPv4Mask(masks[0], masks[1], masks[2], masks[3] )}
-	return  water.Config{
+func GetWaterConf(tunAddr string, tunMask string) water.Config {
+	masks := net.ParseIP(tunMask).To4()
+	maskAddr := net.IPNet{IP: net.ParseIP(tunAddr), Mask: net.IPv4Mask(masks[0], masks[1], masks[2], masks[3])}
+	return water.Config{
 		DeviceType: water.TUN,
 		PlatformSpecificParams: water.PlatformSpecificParams{
-			ComponentID:   "tap0901",
-			Network:       maskAddr.String(),
+			ComponentID: "tap0901",
+			Network:     maskAddr.String(),
 		},
 	}
 }
 
-func GetNetworkAdapter() ([]NetworkAdapter,error){
+func GetNetworkAdapter() ([]NetworkAdapter, error) {
 	var s = []NetworkAdapter{}
 	err := wmi.Query("SELECT Caption,SettingID,InterfaceIndex,DNSServerSearchOrder,DefaultIPGateway,ServiceName,IPAddress,IPSubnet,DHCPEnabled       FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled=True", &s) // WHERE (BIOSVersion IS NOT NULL)
 	if err != nil {
-		log.Printf("err:%v\r\n",err)
-		return nil,err
+		log.Printf("err:%v\r\n", err)
+		return nil, err
 	}
-	return s,nil;
+	return s, nil
 }
-func SetNetConf(dnsIpv4 string,dnsIpv6 string){
-
-}
-
-func ResetNetConf(ip string){
+func SetNetConf(dnsIpv4 string, dnsIpv6 string) {
 
 }
 
+func ResetNetConf(ip string) {
 
+}
 
-func CmdHide(name string, arg ...string) *exec.Cmd{
-	cmd:=exec.Command(name, arg...)
+func CmdHide(name string, arg ...string) *exec.Cmd {
+	cmd := exec.Command(name, arg...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	return cmd;
+	return cmd
 }
-
-
 
 func getAdapterList() (*syscall.IpAdapterInfo, error) {
 	b := make([]byte, 1000)
@@ -202,18 +193,17 @@ func getAdapterList() (*syscall.IpAdapterInfo, error) {
 	return a, nil
 }
 
-func GetLocalAddresses() ([]lAddr ,error) {
+func GetLocalAddresses() ([]lAddr, error) {
 	lAddrs := []lAddr{}
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		return nil,err
+		return nil, err
 	}
 
 	aList, err := getAdapterList()
 	if err != nil {
-		return nil,err
+		return nil, err
 	}
-
 
 	for _, ifi := range ifaces {
 		for ai := aList; ai != nil; ai = ai.Next {
@@ -221,16 +211,16 @@ func GetLocalAddresses() ([]lAddr ,error) {
 			if ifi.Index == int(index) {
 				ipl := &ai.IpAddressList
 				gwl := &ai.GatewayList
-				for ; ipl != nil; ipl = ipl.Next  {
+				for ; ipl != nil; ipl = ipl.Next {
 					itemAddr := lAddr{}
-					itemAddr.Name=ifi.Name
-					itemAddr.IpAddress=fmt.Sprintf("%s",ipl.IpAddress.String)
-					itemAddr.IpMask=fmt.Sprintf("%s",ipl.IpMask.String)
-					itemAddr.GateWay=fmt.Sprintf("%s",gwl.IpAddress.String)
-					lAddrs=append(lAddrs,itemAddr)
+					itemAddr.Name = ifi.Name
+					itemAddr.IpAddress = fmt.Sprintf("%s", ipl.IpAddress.String)
+					itemAddr.IpMask = fmt.Sprintf("%s", ipl.IpMask.String)
+					itemAddr.GateWay = fmt.Sprintf("%s", gwl.IpAddress.String)
+					lAddrs = append(lAddrs, itemAddr)
 				}
 			}
 		}
 	}
-	return lAddrs,err
+	return lAddrs, err
 }
