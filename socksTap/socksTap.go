@@ -7,8 +7,6 @@ import (
 	"goSocksTap/comm/dot"
 	"goSocksTap/comm/netstat"
 	"goSocksTap/comm/socks"
-	"goSocksTap/comm/tun"
-	"goSocksTap/comm/tun2socks"
 	"goSocksTap/winDivert"
 	"io"
 	"log"
@@ -18,6 +16,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dosgo/go-tun2socks/tun"
+	"github.com/dosgo/go-tun2socks/tun2socks"
 
 	"github.com/miekg/dns"
 	"github.com/vishalkuo/bimap"
