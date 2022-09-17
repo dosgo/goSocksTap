@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dosgo/go-tun2socks/core"
 	"github.com/dosgo/go-tun2socks/tun"
 	"github.com/dosgo/go-tun2socks/tun2socks"
 
@@ -24,8 +25,6 @@ import (
 	"github.com/vishalkuo/bimap"
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
-	"gvisor.dev/gvisor/pkg/tcpip"
-	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
 )
 
 var dnsCache *comm.DnsCache
@@ -152,7 +151,7 @@ func (fakeDns *SocksTap) task() {
 	}
 }
 
-func (fakeDns *SocksTap) tcpForwarder(conn *gonet.TCPConn) error {
+func (fakeDns *SocksTap) tcpForwarder(conn core.CommTCPConn) error {
 	var srcAddr = conn.LocalAddr().String()
 	var srcAddrs = strings.Split(srcAddr, ":")
 	var remoteAddr = ""
@@ -198,7 +197,7 @@ func (fakeDns *SocksTap) tcpForwarder(conn *gonet.TCPConn) error {
 	return nil
 }
 
-func (fakeDns *SocksTap) udpForwarder(conn *gonet.UDPConn, ep tcpip.Endpoint) error {
+func (fakeDns *SocksTap) udpForwarder(conn core.CommUDPConn, ep core.CommEndpoint) error {
 	var srcAddr = conn.LocalAddr().String()
 	var remoteAddr = ""
 	remoteAddr = fakeDns.dnsToAddr(srcAddr)
@@ -225,7 +224,7 @@ func (fakeDns *SocksTap) udpForwarder(conn *gonet.UDPConn, ep tcpip.Endpoint) er
 }
 
 /*直连*/
-func (fakeDns *SocksTap) UdpDirect(remoteAddr string, conn *gonet.UDPConn, ep tcpip.Endpoint) {
+func (fakeDns *SocksTap) UdpDirect(remoteAddr string, conn core.CommUDPConn, ep core.CommEndpoint) {
 	//tuntype 直连
 	var limit *comm.UdpLimit
 	_limit, ok := fakeDns.udpLimit.Load(remoteAddr)
