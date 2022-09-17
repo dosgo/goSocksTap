@@ -13,7 +13,6 @@ import (
 	"unsafe"
 
 	"github.com/StackExchange/wmi"
-	"github.com/songgao/water"
 	routetable "github.com/yijunjun/route-table"
 )
 
@@ -140,18 +139,6 @@ type NetworkAdapter struct {
 	ServiceName          string
 	IPSubnet             []string
 	SettingID            string
-}
-
-func GetWaterConf(tunAddr string, tunMask string) water.Config {
-	masks := net.ParseIP(tunMask).To4()
-	maskAddr := net.IPNet{IP: net.ParseIP(tunAddr), Mask: net.IPv4Mask(masks[0], masks[1], masks[2], masks[3])}
-	return water.Config{
-		DeviceType: water.TUN,
-		PlatformSpecificParams: water.PlatformSpecificParams{
-			ComponentID: "tap0901",
-			Network:     maskAddr.String(),
-		},
-	}
 }
 
 func GetNetworkAdapter() ([]NetworkAdapter, error) {
