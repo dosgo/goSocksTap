@@ -7,8 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/dosgo/xsocks/comm"
-	"github.com/dosgo/xsocks/comm/socks"
+	"goSocksTap/comm"
+	"goSocksTap/comm/socks"
+
 	"github.com/miekg/dns"
 	"golang.org/x/sync/singleflight"
 )
@@ -55,7 +56,7 @@ func (rd *DoT) Connect() error {
 		return err
 	}
 	if rd.LSocks != "" {
-		if socks.SocksCmd(srcConn, 1, uint8(0x01), rd.Addr, true) != nil {
+		if socks.SocksCmd(srcConn, 1, uint8(0x01), rd.Addr) != nil {
 			return errors.New("local socks error")
 		}
 	}

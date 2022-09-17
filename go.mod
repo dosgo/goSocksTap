@@ -6,7 +6,6 @@ require (
 	github.com/StackExchange/wmi v1.2.1
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/dosgo/go-tun2socks v1.0.6
-	github.com/dosgo/xsocks v0.0.0-20220917162359-ba4c72606047
 	github.com/macronut/godivert v0.0.0-20220121081532-78e5dd672daf
 	github.com/miekg/dns v1.1.50
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
