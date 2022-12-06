@@ -51,6 +51,10 @@ func loadLookupTable(name string) cidranger.Ranger {
 }
 
 func IsChinaMainlandIP(IP string) bool {
+	//anti-fraud ip
+	if IP == "182.43.124.6" {
+		return false
+	}
 	ipp := net.ParseIP(IP)
 	if gChinaMainlandRange != nil {
 		contains, err := gChinaMainlandRange.Contains(ipp)
