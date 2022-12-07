@@ -51,7 +51,7 @@ type TunDns struct {
 	udpServer      *dns.Server
 	tcpServer      *dns.Server
 	smartDns       int
-	excludeDomains []string
+	excludeDomains map[string]uint8
 	dnsAddr        string
 	dnsAddrV6      string
 	dnsPort        string
@@ -84,9 +84,9 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilt
 	fakeDns.tunDns = &TunDns{smartDns: 1, dnsPort: "653", dnsAddr: "127.0.0.1", dnsAddrV6: "0:0:0:0:0:0:0:1"}
 	fakeDns.tunDns.ip2Domain = bimap.NewBiMap()
 	fakeDns.tunDns.singleflight = &singleflight.Group{}
-	fakeDns.tunDns.excludeDomains = make([]string, 0)
+	fakeDns.tunDns.excludeDomains = make(map[string]uint8)
 	if excludeDomain != "" {
-		fakeDns.tunDns.excludeDomains = append(fakeDns.tunDns.excludeDomains, excludeDomain+".")
+		fakeDns.tunDns.excludeDomains[excludeDomain+"."] = 1
 	}
 
 	//生成本地udp端口避免过滤的时候变动了
@@ -166,7 +166,7 @@ func (fakeDns *SocksTap) tcpForwarder(conn core.CommTCPConn) error {
 			return nil
 		}
 		//add exclude  domain
-		fakeDns.tunDns.excludeDomains = append(fakeDns.tunDns.excludeDomains, domains[0])
+		fakeDns.tunDns.excludeDomains[domains[0]] = 1
 		ip, _, err := fakeDns.tunDns.localResolve(domains[0], 4)
 		if err != nil {
 			fmt.Printf("domain:%s  srcAddr:%s localResolve err:%s\r\n", domains[0], srcAddr, err)
@@ -380,7 +380,8 @@ func (tunDns *TunDns) ipv4Res(domain string) (*dns.A, error) {
 	var dnsErr = false
 	var backErr error = nil
 	ipLog, ok := tunDns.ip2Domain.GetInverse(domain)
-	if ok && !comm.ArrMatch(domain, tunDns.excludeDomains) && strings.HasPrefix(ipLog.(string), tunAddr[0:4]) {
+	_, excludeFlag := tunDns.excludeDomains[domain]
+	if ok && !excludeFlag && strings.HasPrefix(ipLog.(string), tunAddr[0:4]) {
 		ip = ipLog.(string)
 		ipTtl = 1
 	} else {
@@ -412,12 +413,12 @@ func (tunDns *TunDns) ipv4Res(domain string) (*dns.A, error) {
 		}
 
 		//不为空判断是不是中国ip
-		if comm.ArrMatch(domain, tunDns.excludeDomains) || (_ip != nil && (comm.IsChinaMainlandIP(_ip.String()) || !comm.IsPublicIP(_ip))) {
+		if excludeFlag || (_ip != nil && (comm.IsChinaMainlandIP(_ip.String()) || !comm.IsPublicIP(_ip))) {
 			//中国Ip直接回复
 			if _ip != nil {
 				ip = _ip.String()
 			}
-		} else if !comm.ArrMatch(domain, tunDns.excludeDomains) && !dnsErr {
+		} else if !excludeFlag && !dnsErr {
 			//外国随机分配一个代理ip
 			ip = allocIpByDomain(domain, tunDns)
 			ipTtl = 1
@@ -434,7 +435,8 @@ func (tunDns *TunDns) ipv4Res(domain string) (*dns.A, error) {
 func (tunDns *TunDns) ipv6Res(domain string) (interface{}, error) {
 	ipLog, ok := tunDns.ip2Domain.GetInverse(domain)
 	_, ok1 := ipv6To4.Load(domain)
-	if ok && ok1 && !comm.ArrMatch(domain, tunDns.excludeDomains) && strings.HasPrefix(ipLog.(string), tunAddr[0:4]) {
+	_, excludeFlag := tunDns.excludeDomains[domain]
+	if ok && ok1 && !excludeFlag && strings.HasPrefix(ipLog.(string), tunAddr[0:4]) {
 		//ipv6返回错误迫使使用ipv4地址
 		return nil, errors.New("use ipv4")
 	}

@@ -3,24 +3,25 @@ package comm
 import (
 	"bufio"
 	"fmt"
-	"github.com/yl2chen/cidranger"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/yl2chen/cidranger"
 )
 
 var (
 	gChinaMainlandRange cidranger.Ranger
 )
 
-func init(){
+func init() {
 	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
 	name := "iptable.txt"
-	if err==nil&&runtime.GOOS!="windows" {
-		name=dir+"/"+name
+	if err == nil && runtime.GOOS != "windows" {
+		name = dir + "/" + name
 	}
 	if !exists(name) {
 		downloadIPTable(name)
@@ -52,7 +53,13 @@ func loadLookupTable(name string) cidranger.Ranger {
 
 func IsChinaMainlandIP(IP string) bool {
 	//anti-fraud ip
-	if IP == "182.43.124.6" {
+	var fraudIps = map[string]uint8{
+		"182.43.124.6":   1,
+		"124.236.16.201": 1,
+		"223.75.236.241": 1,
+		"39.102.194.95":  1,
+	}
+	if _, ok := fraudIps[IP]; ok {
 		return false
 	}
 	ipp := net.ParseIP(IP)
@@ -67,8 +74,6 @@ func IsChinaMainlandIP(IP string) bool {
 	return false
 }
 
-
-
 func downloadIPTable(name string) error {
 	uri := "https://raw.githubusercontent.com/17mon/china_ip_list/master/china_ip_list.txt"
 	resp, err := http.Get(uri)
@@ -81,11 +86,10 @@ func downloadIPTable(name string) error {
 	if len(nowResp) > 0 {
 		os.WriteFile(name, nowResp, 0644)
 	}
-	return nil;
+	return nil
 }
 
-
-//Exists file exist
+// Exists file exist
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	if err != nil {

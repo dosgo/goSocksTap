@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -238,13 +237,4 @@ type lAddr struct {
 	IpMask     string
 	GateWay    string
 	MACAddress string
-}
-
-func ArrMatch(target string, str_array []string) bool {
-	sort.Strings(str_array)
-	index := sort.SearchStrings(str_array, target)
-	if index < len(str_array) && str_array[index] == target {
-		return true
-	}
-	return false
 }
