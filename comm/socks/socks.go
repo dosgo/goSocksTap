@@ -7,7 +7,6 @@ import (
 	"github.com/dosgo/go-tun2socks/core"
 
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -45,7 +44,7 @@ func UdpHeadDecode(data []byte) (*net.UDPAddr, int, error) {
 		domain := string(data[5 : 5+domainLen])
 		ipAddr, err := net.ResolveIPAddr("ip", domain)
 		if err != nil {
-			return nil, 0, errors.New(fmt.Sprintf("Error -> domain %s dns query err:%v\n", domain, err))
+			return nil, 0, errors.New(log.Sprintf("Error -> domain %s dns query err:%v\n", domain, err))
 		}
 		dstAddr = &net.UDPAddr{
 			IP:   ipAddr.IP,
@@ -54,7 +53,7 @@ func UdpHeadDecode(data []byte) (*net.UDPAddr, int, error) {
 		dataStart = 6 + domainLen
 		break
 	default:
-		return nil, 0, errors.New(fmt.Sprintf(" WARN: ATYP %v do not support.\n", data[3]))
+		return nil, 0, errors.New(log.Sprintf(" WARN: ATYP %v do not support.\n", data[3]))
 
 	}
 	return dstAddr, dataStart, nil
@@ -73,7 +72,7 @@ func UdpProxyRes(clientConn net.Conn, udpAddr *net.UDPAddr) error {
 	if udpAddr == nil {
 		return nil
 	}
-	fmt.Printf("req Udp addr:%v \r\n", udpAddr.String())
+	log.Printf("req Udp addr:%v \r\n", udpAddr.String())
 	/*
 		|VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
 		| 1  |  1  | X'00' |  1   | Variable |    2     |
@@ -97,7 +96,7 @@ func UdpProxyRes(clientConn net.Conn, udpAddr *net.UDPAddr) error {
 func SocksUdpGate(conn core.CommUDPConn, gateAddr string, dstAddr *net.UDPAddr) error {
 	gateConn, err := net.DialTimeout("udp", gateAddr, time.Second*15)
 	if err != nil {
-		fmt.Println(err.Error())
+		log.Println(err.Error())
 		return err
 	}
 	defer conn.Close()

@@ -1,7 +1,7 @@
 package comm
 
 import (
-	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"strconv"
@@ -15,7 +15,7 @@ func GetFreeUdpPort() (string, error) {
 		return "0", err
 	}
 	defer l.Close()
-	return fmt.Sprintf("%d", l.LocalAddr().(*net.UDPAddr).Port), nil
+	return log.Sprintf("%d", l.LocalAddr().(*net.UDPAddr).Port), nil
 }
 
 /*根据子网掩码返回一个IP段*/

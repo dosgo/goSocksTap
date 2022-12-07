@@ -2,7 +2,7 @@ package comm
 
 import (
 	"bytes"
-	"fmt"
+	"log"
 
 	"golang.org/x/time/rate"
 
@@ -223,10 +223,10 @@ func AddRoute(tunAddr string, tunGw string, tunMask string) error {
 	//clear old
 	CmdHide("route", "delete", strings.Join(netNat, ".")).Output()
 	cmd := CmdHide("netsh", "interface", "ipv4", "add", "route", strings.Join(netNat, ".")+"/"+maskAddrs[1], iName, tunGw, "metric=6", "store=active")
-	fmt.Printf("cmd:%s\r\n", cmd.Args)
+	log.Printf("cmd:%s\r\n", cmd.Args)
 	cmd.Run()
 
-	fmt.Printf("cmd:%s\r\n", strings.Join(cmd.Args, " "))
+	log.Printf("cmd:%s\r\n", strings.Join(cmd.Args, " "))
 	CmdHide("ipconfig", "/flushdns").Run()
 	return nil
 }
