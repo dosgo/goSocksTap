@@ -3,12 +3,13 @@ package socks
 import (
 	"bytes"
 	"encoding/binary"
+	"log"
 
 	"github.com/dosgo/go-tun2socks/core"
 
 	"errors"
+	"fmt"
 	"io"
-	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -44,7 +45,7 @@ func UdpHeadDecode(data []byte) (*net.UDPAddr, int, error) {
 		domain := string(data[5 : 5+domainLen])
 		ipAddr, err := net.ResolveIPAddr("ip", domain)
 		if err != nil {
-			return nil, 0, errors.New(log.Sprintf("Error -> domain %s dns query err:%v\n", domain, err))
+			return nil, 0, errors.New(fmt.Sprintf("Error -> domain %s dns query err:%v\n", domain, err))
 		}
 		dstAddr = &net.UDPAddr{
 			IP:   ipAddr.IP,
@@ -53,7 +54,7 @@ func UdpHeadDecode(data []byte) (*net.UDPAddr, int, error) {
 		dataStart = 6 + domainLen
 		break
 	default:
-		return nil, 0, errors.New(log.Sprintf(" WARN: ATYP %v do not support.\n", data[3]))
+		return nil, 0, errors.New(fmt.Sprintf(" WARN: ATYP %v do not support.\n", data[3]))
 
 	}
 	return dstAddr, dataStart, nil

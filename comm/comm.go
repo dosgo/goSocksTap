@@ -7,7 +7,6 @@ import (
 	"golang.org/x/time/rate"
 
 	"io"
-	"log"
 	"net"
 	"strconv"
 	"strings"

@@ -54,7 +54,7 @@ type TunDns struct {
 	dnsAddr        string
 	dnsAddrV6      string
 	dnsPort        string
-	ip2Domain      *bimap.BiMap
+	ip2Domain      *bimap.BiMap[string, string]
 	singleflight   *singleflight.Group
 }
 
@@ -81,7 +81,7 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilt
 
 	//start local dns
 	fakeDns.tunDns = &TunDns{smartDns: 1, dnsPort: "653", dnsAddr: "127.0.0.1", dnsAddrV6: "0:0:0:0:0:0:0:1"}
-	fakeDns.tunDns.ip2Domain = bimap.NewBiMap()
+	fakeDns.tunDns.ip2Domain = bimap.NewBiMap[string, string]()
 	fakeDns.tunDns.singleflight = &singleflight.Group{}
 	fakeDns.tunDns.excludeDomains = make(map[string]uint8)
 	if excludeDomain != "" {
@@ -266,7 +266,7 @@ func (fakeDns *SocksTap) dnsToDomain(remoteAddr string) string {
 	if !ok {
 		return ""
 	}
-	return _domain.(string) + ":" + remoteAddrs[1]
+	return _domain + ":" + remoteAddrs[1]
 }
 
 func (tunDns *TunDns) _startSmartDns(clientPort string) {
@@ -380,8 +380,8 @@ func (tunDns *TunDns) ipv4Res(domain string) (*dns.A, error) {
 	var backErr error = nil
 	ipLog, ok := tunDns.ip2Domain.GetInverse(domain)
 	_, excludeFlag := tunDns.excludeDomains[domain]
-	if ok && !excludeFlag && strings.HasPrefix(ipLog.(string), tunAddr[0:4]) {
-		ip = ipLog.(string)
+	if ok && !excludeFlag && strings.HasPrefix(ipLog, tunAddr[0:4]) {
+		ip = ipLog
 		ipTtl = 1
 	} else {
 		if _ip == nil && len(domain) > 0 {
@@ -435,7 +435,7 @@ func (tunDns *TunDns) ipv6Res(domain string) (interface{}, error) {
 	ipLog, ok := tunDns.ip2Domain.GetInverse(domain)
 	_, ok1 := ipv6To4.Load(domain)
 	_, excludeFlag := tunDns.excludeDomains[domain]
-	if ok && ok1 && !excludeFlag && strings.HasPrefix(ipLog.(string), tunAddr[0:4]) {
+	if ok && ok1 && !excludeFlag && strings.HasPrefix(ipLog, tunAddr[0:4]) {
 		//ipv6返回错误迫使使用ipv4地址
 		return nil, errors.New("use ipv4")
 	}
