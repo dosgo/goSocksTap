@@ -30,7 +30,7 @@ import (
 var dnsCache *comm.DnsCache
 
 func init() {
-	dnsCache = &comm.DnsCache{Cache: make(map[string]string, 128)}
+	dnsCache = &comm.DnsCache{Cache: make(map[string]comm.IpInfo, 128)}
 }
 
 type SocksTap struct {
@@ -49,6 +49,7 @@ type TunDns struct {
 	srcDns         string
 	udpServer      *dns.Server
 	tcpServer      *dns.Server
+	run            bool
 	smartDns       int
 	excludeDomains map[string]uint8
 	socksServerPid int
@@ -286,6 +287,8 @@ func (tunDns *TunDns) _startSmartDns(clientPort string) {
 	tunDns.srcDns = comm.GetUseDns(tunDns.dnsAddr, tunGW, "") + ":53"
 	go tunDns.udpServer.ListenAndServe()
 	go tunDns.tcpServer.ListenAndServe()
+	go tunDns.checkDnsChange()
+	go tunDns.clearDnsCache()
 }
 
 func (tunDns *TunDns) Shutdown() {
@@ -408,6 +411,32 @@ func (tunDns *TunDns) ipv4Res(domain string, remoteAddr net.Addr) (*dns.A, error
 		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: ipTtl},
 		A:   net.ParseIP(ip),
 	}, backErr
+}
+
+/*dns缓存自动清理*/
+func (tunDns *TunDns) clearDnsCache() {
+	for tunDns.run {
+		dnsCache.Free()
+		time.Sleep(time.Second * 60)
+	}
+}
+
+/*检测旧dns改变*/
+func (tunDns *TunDns) checkDnsChange() {
+	for tunDns.run {
+		conn, err := net.DialTimeout("tcp", tunDns.srcDns, time.Second*1)
+		//可能dns变了，
+		if err != nil {
+			oldDns := comm.GetUseDns(tunDns.dnsAddr, tunGW, "")
+			//检测网关DNS是否改变
+			if strings.Index(tunDns.srcDns, oldDns) == -1 {
+				tunDns.srcDns = oldDns + ":53"
+			}
+		} else {
+			conn.Close()
+		}
+		time.Sleep(time.Second * 10)
+	}
 }
 
 /*ipv6智能判断*/
