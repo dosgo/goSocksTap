@@ -16,35 +16,6 @@ import (
 	routetable "github.com/yijunjun/route-table"
 )
 
-func GetGateway() string {
-	table, err := routetable.NewRouteTable()
-	if err != nil {
-		return ""
-	}
-	defer table.Close()
-	rows, err := table.Routes()
-	if err != nil {
-		return ""
-	}
-	var minMetric uint32 = 0
-	var gwIp = ""
-	for _, row := range rows {
-		if routetable.Inet_ntoa(row.ForwardDest, false) == "0.0.0.0" {
-
-			if minMetric == 0 {
-				minMetric = row.ForwardMetric1
-				gwIp = routetable.Inet_ntoa(row.ForwardNextHop, false)
-			} else {
-				if row.ForwardMetric1 < minMetric {
-					minMetric = row.ForwardMetric1
-					gwIp = routetable.Inet_ntoa(row.ForwardNextHop, false)
-				}
-			}
-		}
-	}
-	return gwIp
-}
-
 /*获取旧的dns,内网解析用*/
 func GetUseDns(dnsAddr string, tunGW string, _tunGW string) string {
 	ifIndex := GetGatewayIndex()
@@ -106,27 +77,6 @@ func GetGatewayIndex() uint32 {
 		}
 	}
 	return ifIndex
-}
-
-func GetDnsServerByGateWay(gwIp string) ([]string, bool, bool) {
-	//DNSServerSearchOrder
-	adapters, err := GetNetworkAdapter()
-	var isIpv6 = false
-	if err != nil {
-		return nil, false, isIpv6
-	}
-	for _, v := range adapters {
-		if len(v.DefaultIPGateway) > 0 && v.DefaultIPGateway[0] == gwIp {
-			for _, v2 := range v.IPAddress {
-				if len(v2) > 16 {
-					isIpv6 = true
-					break
-				}
-			}
-			return v.DNSServerSearchOrder, v.DHCPEnabled, isIpv6
-		}
-	}
-	return nil, false, isIpv6
 }
 
 type NetworkAdapter struct {

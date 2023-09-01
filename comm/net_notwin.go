@@ -13,10 +13,6 @@ import (
 
 var oldDns = ""
 
-func GetGateway() string {
-	return ""
-}
-
 func GetDnsServer() []string {
 	dns := []string{}
 	return dns
@@ -72,23 +68,6 @@ func ResetNetConf(ip string) {
 		}
 	}
 	os.WriteFile("/etc/resolv.conf", []byte(reDnsStr), os.ModePerm)
-}
-
-func GetDnsServerByGateWay(gwIp string) ([]string, bool, bool) {
-	oldByte, _ := os.ReadFile("/etc/resolv.conf")
-	dnss := strings.Split(string(oldByte), "\n")
-	var DnsList []string
-
-	for _, _dns := range dnss {
-		if strings.HasPrefix(_dns, "#") {
-			continue
-		} else {
-			dns := strings.Replace(_dns, "nameserver", "", -1)
-			dns = strings.Trim(dns, " ")
-			DnsList = append(DnsList, dns)
-		}
-	}
-	return DnsList, false, false
 }
 
 func CmdHide(name string, arg ...string) *exec.Cmd {
