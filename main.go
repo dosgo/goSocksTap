@@ -1,12 +1,21 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"goSocksTap/socksTap"
 )
 
 func main() {
 
+	var sock5Addr = ""
+	flag.StringVar(&sock5Addr, "sock5Addr", "127.0.0.1:10808", " socks5 addr ")
+	var udpProxy = false
+	flag.BoolVar(&udpProxy, "udpProxy", false, "use udpProxy ")
+
 	var _socksTap = socksTap.SocksTap{}
-	_socksTap.Start("192.168.7.134:10808", "", true, true)
+	fmt.Printf("sock5Addr:%s\r\n", sock5Addr)
+	fmt.Printf("udpProxy:%v\r\n", udpProxy)
+	_socksTap.Start(sock5Addr, "", true, udpProxy)
 	select {}
 }
