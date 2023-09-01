@@ -1,5 +1,5 @@
-//go:build !windows
-// +build !windows
+//go:build !windows && !wasm
+// +build !windows,!wasm
 
 package netstat
 
@@ -15,18 +15,19 @@ import (
 func PortGetPid(lSocks string) (int, error) {
 	socksAddrs := strings.Split(lSocks, ":")
 	lPort, err := strconv.Atoi(socksAddrs[1])
-	tbl, err := netstat.TCPSocks(netstat.NoopFilter)
+	// get only listening TCP sockets
+	tabs, err := netstat.TCPSocks(func(s *netstat.SockTabEntry) bool {
+		return s.State == netstat.Listen && s.LocalAddr.Port == uint16(lPort)
+	})
 	if err != nil {
 		return 0, err
 	}
-	for _, ent := range tbl {
-		if ent.State == netstat.Listen && ent.LocalAddr.Port == uint16(lPort) {
-			if ent.Process != nil {
-				return ent.Process.Pid, nil
-			}
+	for _, ent := range tabs {
+		if ent.Process != nil {
+			return ent.Process.Pid, nil
 		}
 	}
-	return 0, nil
+	return 0, err
 }
 
 func IsUdpSocksServerAddr(pid int, addr string) bool {
