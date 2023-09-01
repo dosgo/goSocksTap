@@ -2,11 +2,6 @@ package socksTap
 
 import (
 	"errors"
-	"goSocksTap/comm"
-	"goSocksTap/comm/dot"
-	"goSocksTap/comm/netstat"
-	"goSocksTap/comm/socks"
-	"goSocksTap/winDivert"
 	"io"
 	"log"
 	"net"
@@ -15,6 +10,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dosgo/goSocksTap/comm"
+	"github.com/dosgo/goSocksTap/comm/dot"
+	"github.com/dosgo/goSocksTap/comm/netstat"
+	"github.com/dosgo/goSocksTap/comm/socks"
+	"github.com/dosgo/goSocksTap/winDivert"
 
 	"github.com/dosgo/go-tun2socks/core"
 	"github.com/dosgo/go-tun2socks/tun"

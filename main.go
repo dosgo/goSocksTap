@@ -3,7 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	"goSocksTap/socksTap"
+
+	"github.com/dosgo/goSocksTap/socksTap"
 )
 
 func main() {

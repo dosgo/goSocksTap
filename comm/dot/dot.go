@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"goSocksTap/comm"
-	"goSocksTap/comm/socks"
+	"github.com/dosgo/goSocksTap/comm"
+	"github.com/dosgo/goSocksTap/comm/socks"
 
 	"github.com/miekg/dns"
 	"golang.org/x/sync/singleflight"

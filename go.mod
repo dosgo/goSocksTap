@@ -1,4 +1,4 @@
-module goSocksTap
+module github.com/dosgo/goSocksTap
 
 go 1.18
 
