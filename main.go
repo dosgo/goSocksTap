@@ -4,11 +4,9 @@ import (
 	"goSocksTap/socksTap"
 )
 
-func main(){
+func main() {
 
-	var _socksTap= socksTap.SocksTap{};
-	_socksTap.Start("127.0.0.1:10808","",true,true)
-	select {
-
-	}
+	var _socksTap = socksTap.SocksTap{}
+	_socksTap.Start("192.168.7.134:10808", "", true, true)
+	select {}
 }

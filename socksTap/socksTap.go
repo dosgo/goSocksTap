@@ -68,6 +68,16 @@ var ipv6To4 sync.Map
 func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilter bool, udpProxy bool) {
 	fakeDns.localSocks = localSocks
 	fakeDns.udpProxy = udpProxy
+	localAddr := comm.GetLocalIpV4()
+
+	fakeDns.safeDns = dot.NewDot("dns.google", "8.8.8.8:853", localSocks)
+
+	//start local dns
+	fakeDns.tunDns = &TunDns{smartDns: 1, dnsPort: "53", dnsAddr: localAddr, dnsAddrV6: "0:0:0:0:0:0:0:1"}
+	fakeDns.tunDns.ip2Domain = bimap.NewBiMap[string, string]()
+	fakeDns.tunDns.singleflight = &singleflight.Group{}
+	fakeDns.tunDns.excludeDomains = make(map[string]uint8)
+
 	if runtime.GOOS == "windows" {
 		if excludeDomain == "" {
 			fakeDns.tunDns.autoFilter = true
@@ -75,16 +85,9 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilt
 			fakeDns.tunDns.autoFilter = autoFilter
 		}
 		fakeDns.tunDns.socksServerPid, _ = netstat.PortGetPid(localSocks)
+		fakeDns.tunDns.dnsPort = "653" //为了避免死循环windows使用653端口
 	}
 
-	fakeDns.safeDns = &dot.DoT{ServerName: "dns.google", Addr: "8.8.8.8:853", LSocks: localSocks}
-	fakeDns.safeDns.Connect()
-
-	//start local dns
-	fakeDns.tunDns = &TunDns{smartDns: 1, dnsPort: "653", dnsAddr: "127.0.0.1", dnsAddrV6: "0:0:0:0:0:0:0:1"}
-	fakeDns.tunDns.ip2Domain = bimap.NewBiMap[string, string]()
-	fakeDns.tunDns.singleflight = &singleflight.Group{}
-	fakeDns.tunDns.excludeDomains = make(map[string]uint8)
 	if excludeDomain != "" {
 		fakeDns.tunDns.excludeDomains[excludeDomain+"."] = 1
 	}
@@ -248,33 +251,36 @@ func (fakeDns *SocksTap) dnsToDomain(remoteAddr string) string {
 
 func (tunDns *TunDns) _startSmartDns(clientPort string) {
 	tunDns.udpServer = &dns.Server{
-		Net:          "udp",
-		Addr:         ":" + tunDns.dnsPort,
+		Net:          "udp4",
+		Addr:         tunDns.dnsAddr + ":" + tunDns.dnsPort,
 		Handler:      dns.HandlerFunc(tunDns.ServeDNS),
 		UDPSize:      4096,
 		ReadTimeout:  time.Duration(10) * time.Second,
 		WriteTimeout: time.Duration(10) * time.Second,
 	}
 	tunDns.tcpServer = &dns.Server{
-		Net:          "tcp",
-		Addr:         ":" + tunDns.dnsPort,
+		Net:          "tcp4",
+		Addr:         tunDns.dnsAddr + ":" + tunDns.dnsPort,
 		Handler:      dns.HandlerFunc(tunDns.ServeDNS),
 		UDPSize:      4096,
 		ReadTimeout:  time.Duration(10) * time.Second,
 		WriteTimeout: time.Duration(10) * time.Second,
 	}
 
-	localPort, _ := strconv.Atoi(clientPort)
-	netAddr := &net.UDPAddr{Port: localPort}
-	_Dialer := &net.Dialer{Timeout: 3 * time.Second, LocalAddr: netAddr}
 	tunDns.dnsClient = &dns.Client{
 		Net:            "udp",
 		UDPSize:        4096,
-		Dialer:         _Dialer,
 		SingleInflight: true,
 		ReadTimeout:    time.Duration(3) * time.Second,
 		WriteTimeout:   time.Duration(2) * time.Second,
 	}
+
+	if runtime.GOOS == "windows" {
+		localPort, _ := strconv.Atoi(clientPort)
+		_dialer := &net.Dialer{Timeout: 10 * time.Second, LocalAddr: &net.UDPAddr{Port: localPort}}
+		tunDns.dnsClient.Dialer = _dialer
+	}
+
 	tunDns.srcDns = comm.GetUseDns(tunDns.dnsAddr, tunGW, "") + ":53"
 	go tunDns.udpServer.ListenAndServe()
 	go tunDns.tcpServer.ListenAndServe()
@@ -368,12 +374,7 @@ func (tunDns *TunDns) ipv4Res(domain string, remoteAddr net.Addr) (*dns.A, error
 			if err == nil {
 				_ip = backIp
 			} else if err.Error() != "Not found addr" {
-				oldDns := comm.GetUseDns(tunDns.dnsAddr, tunGW, "")
-				log.Printf("local dns error:%v oldDns:%s\r\n", err, oldDns)
-				//检测网关DNS是否改变
-				if strings.Index(tunDns.srcDns, oldDns) == -1 {
-					tunDns.srcDns = oldDns
-				}
+				log.Printf("local dns error:%v\r\n", err)
 				//解析错误说明无网络,否则就算不存在也会回复的
 				dnsErr = true //标记为错误
 			}
@@ -470,7 +471,7 @@ func (tunDns *TunDns) localResolve(domain string, ipType int) (net.IP, uint32, e
 		return net.ParseIP(cache), ttl, nil
 	}
 	m1, rtt, err := tunDns.dnsClient.Exchange(query, tunDns.srcDns)
-	log.Printf("localResolve:%s  ipType:%d  rtt:%+v err:%+v\r\n", domain, ipType, rtt, err)
+	var loopIp = ""
 	if err == nil {
 		for _, v := range m1.Answer {
 			if ipType == 4 {
@@ -480,6 +481,8 @@ func (tunDns *TunDns) localResolve(domain string, ipType int) (net.IP, uint32, e
 					if record.A.String() != "127.0.0.1" {
 						dnsCache.WriteDnsCache(domain+":"+strconv.Itoa(ipType), record.Hdr.Ttl, record.A.String())
 						return record.A, record.Hdr.Ttl, nil
+					} else {
+						loopIp = record.A.String()
 					}
 				}
 			}
@@ -492,7 +495,11 @@ func (tunDns *TunDns) localResolve(domain string, ipType int) (net.IP, uint32, e
 			}
 		}
 	} else {
+		log.Printf("localResolve:%s  ipType:%d  rtt:%+v err:%+v\r\n", domain, ipType, rtt, err)
 		return nil, 0, err
+	}
+	if loopIp == "127.0.0.1" {
+		return nil, 0, nil
 	}
 	return nil, 0, errors.New("Not found addr")
 }
