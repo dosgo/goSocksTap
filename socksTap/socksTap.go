@@ -71,6 +71,8 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilt
 	fakeDns.udpProxy = udpProxy
 	localAddr := comm.GetLocalIpV4()
 
+	tunAddr, tunGW = comm.GetUnusedTunAddr()
+
 	fakeDns.safeDns = dot.NewDot("dns.google", "8.8.8.8:853", localSocks)
 
 	//start local dns
@@ -123,7 +125,6 @@ func (fakeDns *SocksTap) Shutdown() {
 }
 
 func (fakeDns *SocksTap) _startTun(mtu int) error {
-	tunAddr, tunGW = comm.GetUnusedTunAddr()
 	var err error
 	fakeDns.tunDev, err = tun.RegTunDev("goSocksTap", tunAddr, tunMask, tunGW, "")
 	if err != nil {
