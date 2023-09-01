@@ -272,9 +272,9 @@ func (tunDns *TunDns) _startSmartDns(clientPort string) {
 	tunDns.dnsClient = &dns.Client{
 		Net:            "udp",
 		UDPSize:        4096,
-		SingleInflight: true,
-		ReadTimeout:    time.Duration(3) * time.Second,
-		WriteTimeout:   time.Duration(2) * time.Second,
+		SingleInflight: false,
+		ReadTimeout:    time.Duration(10) * time.Second,
+		WriteTimeout:   time.Duration(10) * time.Second,
 	}
 
 	if runtime.GOOS == "windows" {
