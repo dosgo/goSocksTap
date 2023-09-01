@@ -9,12 +9,10 @@ require (
 	github.com/imgk/divert-go v0.0.0-20220205193416-faaa83c2c10a
 	github.com/miekg/dns v1.1.55
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
-	github.com/vishalkuo/bimap v0.0.0-20220726225509-e0b4f20de28b
-	github.com/yijunjun/route-table v0.0.0-20160321072918-9608fc1e2e44
+	github.com/vishalkuo/bimap v0.0.0-20230830142743-a9fb9b52066c
 	github.com/yl2chen/cidranger v1.0.2
 	golang.org/x/sync v0.1.0
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8
-
 )
 
 require (

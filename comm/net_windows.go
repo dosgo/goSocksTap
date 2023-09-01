@@ -13,7 +13,6 @@ import (
 	"unsafe"
 
 	"github.com/StackExchange/wmi"
-	routetable "github.com/yijunjun/route-table"
 )
 
 /*获取旧的dns,内网解析用*/
@@ -51,7 +50,7 @@ func GetDnsServerByIfIndex(ifIndex uint32) ([]string, bool, bool) {
 }
 
 func GetGatewayIndex() uint32 {
-	table, err := routetable.NewRouteTable()
+	table, err := NewRouteTable()
 	if err != nil {
 		return 0
 	}
@@ -64,7 +63,7 @@ func GetGatewayIndex() uint32 {
 	var ifIndex uint32 = 0
 	var forwardMask uint32 = 0
 	for _, row := range rows {
-		if routetable.Inet_ntoa(row.ForwardDest, false) == "0.0.0.0" {
+		if Inet_ntoa(row.ForwardDest, false) == "0.0.0.0" {
 			if minMetric == 0 {
 				minMetric = row.ForwardMetric1
 				ifIndex = row.ForwardIfIndex
