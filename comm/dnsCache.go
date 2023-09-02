@@ -20,7 +20,7 @@ func (rd *DnsCache) Free() {
 	defer rd.Unlock()
 	for k, v := range rd.Cache {
 		//60ms
-		if time.Now().Unix() > v.cacheTime {
+		if time.Now().Unix() > v.cacheTime+60 {
 			delete(rd.Cache, k)
 		}
 	}
