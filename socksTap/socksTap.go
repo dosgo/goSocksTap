@@ -253,6 +253,7 @@ func (fakeDns *SocksTap) dnsToDomain(remoteAddr string) string {
 }
 
 func (tunDns *TunDns) _startSmartDns(clientPort string) {
+	tunDns.run = true
 	tunDns.udpServer = &dns.Server{
 		Net:          "udp4",
 		Addr:         tunDns.dnsAddr + ":" + tunDns.dnsPort,
