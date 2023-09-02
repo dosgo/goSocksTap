@@ -23,7 +23,6 @@ import (
 
 	"github.com/miekg/dns"
 	"github.com/vishalkuo/bimap"
-	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 )
 
@@ -50,7 +49,6 @@ type TunDns struct {
 	udpServer      *dns.Server
 	tcpServer      *dns.Server
 	run            bool
-	smartDns       int
 	excludeDomains map[string]uint8
 	socksServerPid int
 	autoFilter     bool
@@ -58,7 +56,6 @@ type TunDns struct {
 	dnsAddrV6      string
 	dnsPort        string
 	ip2Domain      *bimap.BiMap[string, string]
-	singleflight   *singleflight.Group
 }
 
 var tunAddr = "10.0.0.2"
@@ -70,18 +67,12 @@ var ipv6To4 sync.Map
 func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilter bool, udpProxy bool) {
 	fakeDns.localSocks = localSocks
 	fakeDns.udpProxy = udpProxy
-	localAddr := comm.GetLocalIpV4()
-
 	tunAddr, tunGW = comm.GetUnusedTunAddr()
-
 	fakeDns.safeDns = dot.NewDot("dns.google", "8.8.8.8:853", localSocks)
-
 	//start local dns
-	fakeDns.tunDns = &TunDns{smartDns: 1, dnsPort: "53", dnsAddr: localAddr, dnsAddrV6: "0:0:0:0:0:0:0:1"}
+	fakeDns.tunDns = &TunDns{dnsPort: "53", dnsAddr: tunAddr, dnsAddrV6: "0:0:0:0:0:0:0:1"}
 	fakeDns.tunDns.ip2Domain = bimap.NewBiMap[string, string]()
-	fakeDns.tunDns.singleflight = &singleflight.Group{}
 	fakeDns.tunDns.excludeDomains = make(map[string]uint8)
-
 	if runtime.GOOS == "windows" {
 		if excludeDomain == "" {
 			fakeDns.tunDns.autoFilter = true
@@ -91,7 +82,7 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilt
 		fakeDns.tunDns.socksServerPid, _ = netstat.PortGetPid(localSocks)
 		fakeDns.tunDns.dnsPort = "653" //为了避免死循环windows使用653端口
 	}
-
+	fakeDns._startTun(1500)
 	if excludeDomain != "" {
 		fakeDns.tunDns.excludeDomains[excludeDomain+"."] = 1
 	}
@@ -104,7 +95,6 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilt
 	if runtime.GOOS != "windows" {
 		comm.SetNetConf(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsAddrV6)
 	}
-	fakeDns._startTun(1500)
 	if runtime.GOOS == "windows" {
 		go winDivert.RedirectDNS(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort, clientPort)
 	}
@@ -307,10 +297,10 @@ func (tunDns *TunDns) doIPv4Query(r *dns.Msg, remoteAddr net.Addr) (*dns.Msg, er
 	m.SetReply(r)
 	m.Authoritative = false
 	domain := r.Question[0].Name
-	v, err, _ := tunDns.singleflight.Do(domain+":4", func() (interface{}, error) {
-		return tunDns.ipv4Res(domain, remoteAddr)
-	})
-	m.Answer = []dns.RR{v.(*dns.A)}
+	v, err := tunDns.ipv4Res(domain, remoteAddr)
+	if err == nil {
+		m.Answer = []dns.RR{v}
+	}
 	// final
 	return m, err
 }
@@ -321,9 +311,7 @@ func (tunDns *TunDns) doIPv6Query(r *dns.Msg) (*dns.Msg, error) {
 	m.SetReply(r)
 	m.Authoritative = false
 	domain := r.Question[0].Name
-	v, err, _ := tunDns.singleflight.Do(domain+":6", func() (interface{}, error) {
-		return tunDns.ipv6Res(domain)
-	})
+	v, err := tunDns.ipv6Res(domain)
 	_, isA := v.(*dns.A)
 	if isA {
 		m.Answer = []dns.RR{v.(*dns.A)}
@@ -539,7 +527,7 @@ func (tunDns *TunDns) localResolve(domain string, ipType int) (net.IP, uint32, e
 /*给域名分配私有地址*/
 func allocIpByDomain(domain string, tunDns *TunDns) string {
 	var ip = ""
-	for i := 0; i <= 2; i++ {
+	for i := 0; i <= 5; i++ {
 		ip = comm.GetCidrRandIpByNet(tunAddr, tunMask)
 		_, ok := tunDns.ip2Domain.Get(ip)
 		if !ok && ip != tunAddr {
