@@ -34,8 +34,17 @@ func GetWaterConf(tunAddr string, tunMask string) water.Config {
 func SetNetConf(dnsIpv4 string, dnsIpv6 string) {
 	var dnsByte = []byte("nameserver " + dnsIpv4 + "\n")
 	oldByte, _ := os.ReadFile("/etc/resolv.conf")
-	dnsByte = append(dnsByte, oldByte...)
-	os.WriteFile("/etc/resolv.conf", dnsByte, os.ModePerm)
+	dnss := strings.Split(string(oldByte), "\n")
+	var reDnsStr = ""
+	for _, _dns := range dnss {
+		if strings.Index(_dns, dnsIpv4) != -1 {
+			continue
+		} else {
+			reDnsStr += _dns + "\n"
+		}
+	}
+	reDnsStr = string(dnsByte) + reDnsStr
+	os.WriteFile("/etc/resolv.conf", []byte(reDnsStr), os.ModePerm)
 }
 
 /*获取旧的dns,内网解析用*/
