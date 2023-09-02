@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/miekg/dns"
 	"github.com/songgao/water"
 )
 
@@ -59,10 +60,32 @@ func GetUseDns(dnsAddr string, tunGW string, _tunGW string) string {
 			continue
 		} else if strings.Index(_dns, "nameserver") != -1 {
 			oldDns = strings.TrimSpace(strings.Replace(_dns, "nameserver", "", -1))
-			return oldDns
+			// 执行DNS查询
+			if checkDns(oldDns) {
+				return oldDns
+			}
 		}
 	}
 	return "114.114.114.114"
+}
+
+func checkDns(dnsServer string) bool {
+	domain := "www.taobao.com" // 替换为你要查询的域名
+	qtype := dns.TypeA         // 替换为你要执行的查询类型
+	// 创建DNS消息
+	msg := new(dns.Msg)
+	msg.SetQuestion(dns.Fqdn(domain), qtype)
+	// 创建DNS客户端
+	client := new(dns.Client)
+	// 执行DNS查询
+	response, _, err := client.Exchange(msg, dnsServer+":53")
+	if err != nil {
+		return false
+	}
+	if response.Rcode != dns.RcodeSuccess {
+		return false
+	}
+	return true
 }
 
 func ResetNetConf(ip string) {

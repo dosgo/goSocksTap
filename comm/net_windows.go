@@ -22,7 +22,6 @@ func GetUseDns(dnsAddr string, tunGW string, _tunGW string) string {
 	for _, v := range dnsServers {
 		if v != dnsAddr && v != tunGW && v != _tunGW {
 			return v
-			break
 		}
 	}
 	return "114.114.114.114"
