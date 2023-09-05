@@ -94,7 +94,7 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilt
 		comm.SetNetConf(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsAddrV6)
 	}
 	if runtime.GOOS == "windows" {
-		fakeDns.tunDns.sendStartPort = 6000
+		fakeDns.tunDns.sendStartPort = 600
 		go winDivert.RedirectDNS(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort, fakeDns.tunDns.sendStartPort, fakeDns.tunDns.sendStartPort+5)
 	}
 	//udp limit auto remove
