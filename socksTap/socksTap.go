@@ -268,12 +268,6 @@ func (tunDns *TunDns) _startSmartDns() {
 		WriteTimeout:   time.Duration(10) * time.Second,
 	}
 
-	if runtime.GOOS == "windows" {
-		//localPort, _ := strconv.Atoi(clientPort)
-		//_dialer := &net.Dialer{Timeout: 10 * time.Second, LocalAddr: &net.UDPAddr{Port: localPort}}
-		//tunDns.dnsClient.Dialer = _dialer
-	}
-
 	tunDns.srcDns = comm.GetUseDns(tunDns.dnsAddr, tunGW, "") + ":53"
 	go tunDns.udpServer.ListenAndServe()
 	go tunDns.tcpServer.ListenAndServe()
