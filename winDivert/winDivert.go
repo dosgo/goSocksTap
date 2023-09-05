@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/imgk/divert-go"
@@ -28,7 +29,7 @@ func dllInit(_divertDll string) {
 }
 
 /*windows转发*/
-func RedirectDNS(dnsAddr string, _port string, sendPort string) {
+func RedirectDNS(dnsAddr string, _port string, sendStartPort int, sendEndPort int) {
 	var err error
 	_, err = os.Stat(divertDll)
 	if err != nil {
@@ -36,7 +37,13 @@ func RedirectDNS(dnsAddr string, _port string, sendPort string) {
 		return
 	}
 	winDivertRun = true
-	winDivert, err = divert.Open("outbound and !loopback and !impostor and udp.DstPort=53 and udp.SrcPort!="+sendPort, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
+	var filter = "outbound and !loopback and !impostor and udp.DstPort=53"
+
+	for i := sendStartPort; i <= sendEndPort; i++ {
+		filter = filter + " and udp.SrcPort!=" + strconv.Itoa(i)
+	}
+
+	winDivert, err = divert.Open(filter, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
 	if err != nil {
 		log.Printf("winDivert open failed: %v\r\n", err)
 		return

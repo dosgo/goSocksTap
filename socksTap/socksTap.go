@@ -38,9 +38,8 @@ type SocksTap struct {
 	run        bool
 	tunDns     *TunDns
 	safeDns    *dot.DoT
-
-	udpProxy bool
-	tunDev   io.ReadWriteCloser
+	udpProxy   bool
+	tunDev     io.ReadWriteCloser
 }
 
 type TunDns struct {
@@ -56,6 +55,7 @@ type TunDns struct {
 	dnsAddrV6      string
 	dnsPort        string
 	ip2Domain      *bimap.BiMap[string, string]
+	sendStartPort  int
 }
 
 var tunAddr = "10.0.0.2"
@@ -87,16 +87,15 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilt
 		fakeDns.tunDns.excludeDomains[excludeDomain+"."] = 1
 	}
 
-	//生成本地udp端口避免过滤的时候变动了
-	clientPort, _ := comm.GetFreeUdpPort()
-	fakeDns.tunDns._startSmartDns(clientPort)
+	fakeDns.tunDns._startSmartDns()
 
 	//edit DNS
 	if runtime.GOOS != "windows" {
 		comm.SetNetConf(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsAddrV6)
 	}
 	if runtime.GOOS == "windows" {
-		go winDivert.RedirectDNS(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort, clientPort)
+		fakeDns.tunDns.sendStartPort = 6000
+		go winDivert.RedirectDNS(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort, fakeDns.tunDns.sendStartPort, fakeDns.tunDns.sendStartPort+5)
 	}
 	//udp limit auto remove
 	fakeDns.run = true
@@ -242,7 +241,7 @@ func (fakeDns *SocksTap) dnsToDomain(remoteAddr string) string {
 	return _domain + ":" + remoteAddrs[1]
 }
 
-func (tunDns *TunDns) _startSmartDns(clientPort string) {
+func (tunDns *TunDns) _startSmartDns() {
 	tunDns.run = true
 	tunDns.udpServer = &dns.Server{
 		Net:          "udp4",
@@ -270,9 +269,9 @@ func (tunDns *TunDns) _startSmartDns(clientPort string) {
 	}
 
 	if runtime.GOOS == "windows" {
-		localPort, _ := strconv.Atoi(clientPort)
-		_dialer := &net.Dialer{Timeout: 10 * time.Second, LocalAddr: &net.UDPAddr{Port: localPort}}
-		tunDns.dnsClient.Dialer = _dialer
+		//localPort, _ := strconv.Atoi(clientPort)
+		//_dialer := &net.Dialer{Timeout: 10 * time.Second, LocalAddr: &net.UDPAddr{Port: localPort}}
+		//tunDns.dnsClient.Dialer = _dialer
 	}
 
 	tunDns.srcDns = comm.GetUseDns(tunDns.dnsAddr, tunGW, "") + ":53"
@@ -280,6 +279,31 @@ func (tunDns *TunDns) _startSmartDns(clientPort string) {
 	go tunDns.tcpServer.ListenAndServe()
 	go tunDns.checkDnsChange()
 	go tunDns.clearDnsCache()
+}
+
+func (tunDns *TunDns) Exchange(m *dns.Msg) (r *dns.Msg, rtt time.Duration, err error) {
+	if runtime.GOOS != "windows" {
+		return tunDns.dnsClient.Exchange(m, tunDns.srcDns)
+	}
+	var i = 0
+	for {
+		_dialer := &net.Dialer{Timeout: 10 * time.Second, LocalAddr: &net.UDPAddr{Port: tunDns.sendStartPort + i}}
+		conn, err1 := _dialer.Dial("udp", tunDns.srcDns)
+		if err1 == nil {
+			//windows 使用虚拟udp不然会被劫持
+			dnsClientConn := new(dns.Conn)
+			dnsClientConn.Conn = conn
+			dnsClientConn.UDPSize = 4096
+			defer dnsClientConn.Close()
+			return tunDns.dnsClient.ExchangeWithConn(m, dnsClientConn)
+		}
+		if i >= 5 {
+			break
+		}
+	}
+
+	return nil, 0, errors.New("port use.")
+
 }
 
 func (tunDns *TunDns) Shutdown() {
@@ -337,7 +361,7 @@ func (tunDns *TunDns) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		break
 	default:
 		var rtt time.Duration
-		msg, rtt, err = tunDns.dnsClient.Exchange(r, tunDns.srcDns)
+		msg, rtt, err = tunDns.Exchange(r)
 		log.Printf("ServeDNS default rtt:%+v err:%+v\r\n", rtt, err)
 		break
 	}
@@ -490,7 +514,7 @@ func (tunDns *TunDns) localResolve(domain string, ipType int) (net.IP, uint32, e
 	if cache != "" {
 		return net.ParseIP(cache), ttl, nil
 	}
-	m1, rtt, err := tunDns.dnsClient.Exchange(query, tunDns.srcDns)
+	m1, rtt, err := tunDns.Exchange(query)
 	var loopIp = ""
 	if err == nil {
 		for _, v := range m1.Answer {
