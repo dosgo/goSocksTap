@@ -284,6 +284,7 @@ func (tunDns *TunDns) Exchange(m *dns.Msg) (r *dns.Msg, rtt time.Duration, err e
 		_dialer := &net.Dialer{Timeout: 10 * time.Second, LocalAddr: &net.UDPAddr{Port: tunDns.sendStartPort + i}}
 		conn, err1 := _dialer.Dial("udp", tunDns.srcDns)
 		if err1 == nil {
+			defer conn.Close()
 			//windows 使用虚拟udp不然会被劫持
 			dnsClientConn := new(dns.Conn)
 			dnsClientConn.Conn = conn
@@ -413,7 +414,7 @@ func (tunDns *TunDns) ipv4Res(domain string, remoteAddr net.Addr) (*dns.A, error
 			ipTtl = 1
 		}
 	}
-	log.Printf("domain:%s ip:%s\r\n", domain, ip)
+	log.Printf("domain:%s ip:%s backErr:%+v\r\n", domain, ip, backErr)
 	return &dns.A{
 		Hdr: dns.RR_Header{Name: domain, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: ipTtl},
 		A:   net.ParseIP(ip),
