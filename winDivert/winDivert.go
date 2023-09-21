@@ -53,8 +53,8 @@ func RedirectDNS(dnsAddr string, _port string, sendStartPort int, sendEndPort in
 	var dnsRecvBuf []byte = make([]byte, 1500)
 	var recvBuf []byte = make([]byte, 1500)
 	addr := divert.Address{}
-	dnsConn, _ := net.DialTimeout("udp", dnsAddr+":"+_port, time.Second*15)
-	defer dnsConn.Close()
+	var dnsConn net.Conn
+	dnsConn, _ = net.DialTimeout("udp", dnsAddr+":"+_port, time.Second*15)
 	for winDivertRun {
 		if winDivert == nil {
 			continue
@@ -109,7 +109,12 @@ func RedirectDNS(dnsAddr string, _port string, sendStartPort int, sendEndPort in
 				log.Println(1, err)
 				return
 			}
+		} else {
+			dnsConn, _ = net.DialTimeout("udp", dnsAddr+":"+_port, time.Second*15)
 		}
+	}
+	if dnsConn != nil {
+		dnsConn.Close()
 	}
 }
 
