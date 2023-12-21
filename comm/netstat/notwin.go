@@ -4,7 +4,6 @@
 package netstat
 
 import (
-	"os"
 	"strconv"
 	"strings"
 
@@ -28,21 +27,4 @@ func PortGetPid(lSocks string) (int, error) {
 		}
 	}
 	return 0, err
-}
-
-func IsUdpSocksServerAddr(pid int, addr string) bool {
-	tbl, err := netstat.UDPSocks(netstat.NoopFilter)
-	if err != nil {
-		return false
-	}
-	for _, ent := range tbl {
-		if ent.State == netstat.Established || ent.State == netstat.FinWait1 || ent.State == netstat.FinWait2 || ent.State == netstat.SynSent {
-			if strings.Index(ent.RemoteAddr.String(), addr) != -1 {
-				if ent.Process != nil && (ent.Process.Pid == pid || ent.Process.Pid == os.Getpid()) {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }

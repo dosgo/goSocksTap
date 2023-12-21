@@ -4,7 +4,6 @@
 package netstat
 
 import (
-	"os"
 	"strconv"
 	"strings"
 
@@ -31,25 +30,4 @@ func PortGetPid(lSocks string) (int, error) {
 		}
 	}
 	return 0, nil
-}
-
-func IsUdpSocksServerAddr(pid int, addr string) bool {
-	tbl, err := netstat.GetUDPTableOwnerPID(true)
-	if err != nil {
-		return false
-	}
-	s := tbl.Rows()
-	for i := range s {
-		ent := netstat.SockTabEntry{
-			LocalAddr:  s[i].LocalSock(),
-			RemoteAddr: s[i].RemoteSock(),
-			State:      s[i].SockState(),
-		}
-		if strings.Index(ent.RemoteAddr.String(), addr) != -1 {
-			if int(s[i].WinPid) == pid || int(s[i].WinPid) == os.Getpid() {
-				return true
-			}
-		}
-	}
-	return false
 }

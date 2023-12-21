@@ -110,6 +110,7 @@ func RedirectDNS(dnsAddr string, _port string, sendStartPort int, sendEndPort in
 				return
 			}
 		} else {
+			dnsConn.Close()
 			dnsConn, _ = net.DialTimeout("udp", dnsAddr+":"+_port, time.Second*15)
 		}
 	}

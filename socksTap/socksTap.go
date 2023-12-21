@@ -49,8 +49,8 @@ type TunDns struct {
 	tcpServer      *dns.Server
 	run            bool
 	excludeDomains map[string]uint8
+	excludeDomain  string
 	socksServerPid int
-	autoFilter     bool
 	dnsAddr        string
 	dnsAddrV6      string
 	dnsPort        string
@@ -64,7 +64,7 @@ var tunMask = "255.255.0.0"
 var fakeUdpNat sync.Map
 var ipv6To4 sync.Map
 
-func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilter bool, udpProxy bool) {
+func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy bool) {
 	fakeDns.localSocks = localSocks
 	fakeDns.udpProxy = udpProxy
 	tunAddr, tunGW = comm.GetUnusedTunAddr()
@@ -74,17 +74,16 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, autoFilt
 	fakeDns.tunDns.ip2Domain = bimap.NewBiMap[string, string]()
 	fakeDns.tunDns.excludeDomains = make(map[string]uint8)
 	if runtime.GOOS == "windows" {
-		if excludeDomain == "" {
-			fakeDns.tunDns.autoFilter = true
-		} else {
-			fakeDns.tunDns.autoFilter = autoFilter
-		}
 		fakeDns.tunDns.socksServerPid, _ = netstat.PortGetPid(localSocks)
 		fakeDns.tunDns.dnsPort = "653" //为了避免死循环windows使用653端口
 	}
 	fakeDns._startTun(1500)
 	if excludeDomain != "" {
-		fakeDns.tunDns.excludeDomains[excludeDomain+"."] = 1
+		excludeDomainList := strings.Split(excludeDomain, ";")
+		for i := 0; i < len(excludeDomainList); i++ {
+			fakeDns.tunDns.excludeDomains[excludeDomainList[i]+"."] = 1
+		}
+		fakeDns.tunDns.excludeDomain = excludeDomain
 	}
 
 	fakeDns.tunDns._startSmartDns()
@@ -376,6 +375,14 @@ func (tunDns *TunDns) ipv4Res(domain string, remoteAddr net.Addr) (*dns.A, error
 	var backErr error = nil
 	ipLog, ok := tunDns.ip2Domain.GetInverse(domain)
 	_, excludeFlag := tunDns.excludeDomains[domain]
+
+	if !excludeFlag {
+		excludeFlag = strings.Contains(domain, tunDns.excludeDomain)
+		if !excludeFlag {
+			excludeFlag = strings.Contains(tunDns.excludeDomain, strings.TrimRight(domain, "."))
+		}
+	}
+
 	if ok && !excludeFlag && strings.HasPrefix(ipLog, tunAddr[0:4]) {
 		ip = ipLog
 		ipTtl = 1
@@ -396,10 +403,6 @@ func (tunDns *TunDns) ipv4Res(domain string, remoteAddr net.Addr) (*dns.A, error
 				//backErr = errors.New("only ipv6")
 				dnsErr = true
 			}
-		}
-		//自动排除
-		if tunDns.autoFilter && netstat.IsUdpSocksServerAddr(tunDns.socksServerPid, remoteAddr.String()) {
-			excludeFlag = true
 		}
 
 		//不为空判断是不是中国ip

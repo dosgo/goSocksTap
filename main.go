@@ -17,6 +17,6 @@ func main() {
 	var _socksTap = socksTap.SocksTap{}
 	fmt.Printf("sock5Addr:%s\r\n", sock5Addr)
 	fmt.Printf("udpProxy:%v\r\n", udpProxy)
-	_socksTap.Start(sock5Addr, "", true, udpProxy)
+	_socksTap.Start(sock5Addr, "xxx.com", udpProxy)
 	select {}
 }
