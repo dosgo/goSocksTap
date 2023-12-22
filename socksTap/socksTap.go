@@ -401,7 +401,7 @@ func (tunDns *TunDns) ipv4Res(domain string, remoteAddr net.Addr) (*dns.A, error
 	ipLog, ok := tunDns.ip2Domain.GetInverse(domain)
 	_, excludeFlag := tunDns.excludeDomains[domain]
 
-	if !excludeFlag {
+	if !excludeFlag && tunDns.excludeDomain != "" {
 		excludeFlag = strings.Contains(domain, tunDns.excludeDomain)
 		if !excludeFlag {
 			excludeFlag = strings.Contains(tunDns.excludeDomain, strings.TrimRight(domain, "."))
