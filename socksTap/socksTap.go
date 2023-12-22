@@ -148,23 +148,29 @@ func (fakeDns *SocksTap) task() {
 func (fakeDns *SocksTap) tcpForwarder(conn core.CommTCPConn) error {
 	defer conn.Close()
 	var srcAddr = conn.LocalAddr().String()
-	remoteAddrs := strings.Split(srcAddr, ":")
-	domain := remoteAddrs[0]
 	//不走代理
-	if netstat.IsSocksServerAddr(fakeDns.tunDns.socksServerPid,conn.RemoteAddr().String()) {
-		localIp, _, err := fakeDns.tunDns.localResolve(domain[0:len(domain)-1], 4)
-		if err!=nil {
-			log.Printf("localIp:%s srcAddr:%s\r\n", localIp.String(), srcAddr)
+	if netstat.IsSocksServerAddr(fakeDns.tunDns.socksServerPid, conn.RemoteAddr().String()) {
+
+		remoteAddr := fakeDns.dnsToDomain(srcAddr)
+		if remoteAddr == "" {
 			return nil
 		}
-		socksConn, err := net.DialTimeout("tcp",localIp.String()+":" + remoteAddrs[1], time.Second*15)
+		remoteAddrs := strings.Split(remoteAddr, ":")
+		domain := remoteAddrs[0]
+		fakeDns.tunDns.excludeDomains[domain] = 1 //标记为跳过代理域名
+		localIp, _, err := fakeDns.tunDns.localResolve(domain, 4)
+		if err != nil {
+			log.Printf("localIp:%s srcAddr:%s domain:%s\r\n", localIp.String(), srcAddr, domain[0:len(domain)-1])
+			return nil
+		}
+		socksConn, err := net.DialTimeout("tcp", localIp.String()+":"+remoteAddrs[1], time.Second*15)
 		if err != nil {
 			log.Printf("err:%v", err)
 			return nil
 		}
 		defer socksConn.Close()
 		comm.TcpPipe(conn, socksConn, time.Minute*2)
-	}else{
+	} else {
 		//走代理
 		var remoteAddr = ""
 		var addrType = 0x01

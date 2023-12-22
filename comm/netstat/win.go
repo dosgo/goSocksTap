@@ -44,7 +44,7 @@ func IsSocksServerAddr(pid int, addr string) bool {
 			RemoteAddr: s[i].RemoteSock(),
 			State:      s[i].SockState(),
 		}
-		if strings.Index(ent.RemoteAddr.String(), addr) != -1 {
+		if strings.Index(ent.LocalAddr.String(), addr) != -1 {
 			if int(s[i].WinPid) == pid {
 				return true
 			}

@@ -28,3 +28,7 @@ func PortGetPid(lSocks string) (int, error) {
 	}
 	return 0, err
 }
+
+func IsSocksServerAddr(pid int, addr string) bool {
+	return false
+}
