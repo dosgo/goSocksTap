@@ -31,3 +31,24 @@ func PortGetPid(lSocks string) (int, error) {
 	}
 	return 0, nil
 }
+
+func IsSocksServerAddr(pid int, addr string) bool {
+	tbl, err := netstat.GetTCPTable2(true)
+	if err != nil {
+		return false
+	}
+	s := tbl.Rows()
+	for i := range s {
+		ent := netstat.SockTabEntry{
+			LocalAddr:  s[i].LocalSock(),
+			RemoteAddr: s[i].RemoteSock(),
+			State:      s[i].SockState(),
+		}
+		if strings.Index(ent.RemoteAddr.String(), addr) != -1 {
+			if int(s[i].WinPid) == pid {
+				return true
+			}
+		}
+	}
+	return false
+}
