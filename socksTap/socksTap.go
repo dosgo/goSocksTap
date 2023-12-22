@@ -146,23 +146,42 @@ func (fakeDns *SocksTap) task() {
 }
 
 func (fakeDns *SocksTap) tcpForwarder(conn core.CommTCPConn) error {
-	var srcAddr = conn.LocalAddr().String()
-	var remoteAddr = ""
-	var addrType = 0x01
 	defer conn.Close()
-	remoteAddr = fakeDns.dnsToAddr(srcAddr)
-	if remoteAddr == "" {
-		log.Printf("remoteAddr:%s srcAddr:%s\r\n", remoteAddr, srcAddr)
-		return nil
-	}
-	socksConn, err := net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
-	if err != nil {
-		log.Printf("err:%v", err)
-		return nil
-	}
-	defer socksConn.Close()
-	if socks.SocksCmd(socksConn, 1, uint8(addrType), remoteAddr, true) == nil {
+	var srcAddr = conn.LocalAddr().String()
+	remoteAddrs := strings.Split(srcAddr, ":")
+	domain := remoteAddrs[0]
+	//不走代理
+	if netstat.IsSocksServerAddr(fakeDns.tunDns.socksServerPid,conn.RemoteAddr().String()) {
+		localIp, _, err := fakeDns.tunDns.localResolve(domain[0:len(domain)-1], 4)
+		if err!=nil {
+			log.Printf("localIp:%s srcAddr:%s\r\n", localIp.String(), srcAddr)
+			return nil
+		}
+		socksConn, err := net.DialTimeout("tcp",localIp.String()+":" + remoteAddrs[1], time.Second*15)
+		if err != nil {
+			log.Printf("err:%v", err)
+			return nil
+		}
+		defer socksConn.Close()
 		comm.TcpPipe(conn, socksConn, time.Minute*2)
+	}else{
+		//走代理
+		var remoteAddr = ""
+		var addrType = 0x01
+		remoteAddr = fakeDns.dnsToAddr(srcAddr)
+		if remoteAddr == "" {
+			log.Printf("remoteAddr:%s srcAddr:%s\r\n", remoteAddr, srcAddr)
+			return nil
+		}
+		socksConn, err := net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
+		if err != nil {
+			log.Printf("err:%v", err)
+			return nil
+		}
+		defer socksConn.Close()
+		if socks.SocksCmd(socksConn, 1, uint8(addrType), remoteAddr, true) == nil {
+			comm.TcpPipe(conn, socksConn, time.Minute*2)
+		}
 	}
 	return nil
 }
