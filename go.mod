@@ -27,5 +27,5 @@ require (
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard v0.0.0-20230704135630-469159ecf7d1 // indirect
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
-	gvisor.dev/gvisor v0.0.0-20230721184925-1a20c31151f2 // indirect
+	gvisor.dev/gvisor v0.0.0-20231020174304-b8a429915ff1 // indirect
 )
