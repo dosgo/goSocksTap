@@ -46,16 +46,17 @@ func TunNatSawp(_udpNat *sync.Map, conn core.CommUDPConn, ep core.CommEndpoint, 
 			defer _remoteConn.Close()
 			defer _conn.Close()
 			//buf:= make([]byte, 1024*5);
+			var readLen=0;
 			for {
 				_remoteConn.SetReadDeadline(time.Now().Add(duration))
 				buf := poolNatBuf.Get().([]byte)
-				n, err := _remoteConn.Read(buf)
+				readLen, err = _remoteConn.Read(buf)
 				if err != nil {
 					log.Printf("err:%v\r\n", err)
 					return
 				}
 				buffer.Reset()
-				buffer.Write(buf[:n])
+				buffer.Write(buf[:readLen])
 				_, err = _conn.Write(buffer.Bytes())
 				if err != nil {
 					log.Printf("err:%v\r\n", err)
