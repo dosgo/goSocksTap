@@ -55,32 +55,33 @@ func RedirectDNS(dnsAddr string, _port string, sendStartPort int, sendEndPort in
 	addr := divert.Address{}
 	var dnsConn net.Conn
 	dnsConn, _ = net.DialTimeout("udp", dnsAddr+":"+_port, time.Second*15)
+	var udpsize=0;
+	var packetsize int=0;
+	var ipheadlen int
+	var recvLen uint
+	var conRecvLen int
+	var udpheadlen = 8
 	for winDivertRun {
 		if winDivert == nil {
 			continue
 		}
-		recvLen, err := winDivert.Recv(recvBuf, &addr)
+		recvLen, err = winDivert.Recv(recvBuf, &addr)
 		if err != nil {
 			log.Println(1, err)
 			continue
 		}
 		ipv6 := recvBuf[0]>>4 == 6
-		var ipheadlen int
 		if ipv6 {
 			ipheadlen = 40
 		} else {
 			ipheadlen = int(recvBuf[0]&0xF) * 4
 		}
-		udpheadlen := 8
-		request := recvBuf[ipheadlen+udpheadlen : recvLen]
 		dnsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		dnsConn.Write(request)
+		dnsConn.Write(recvBuf[ipheadlen+udpheadlen : recvLen])
 		dnsConn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		n, err := dnsConn.Read(dnsRecvBuf)
+		conRecvLen, err = dnsConn.Read(dnsRecvBuf)
 		if err == nil {
-			var response = dnsRecvBuf[:n]
-			udpsize := len(response) + 8
-			var packetsize int
+			udpsize = conRecvLen +udpheadlen
 			if ipv6 {
 				copy(rawbuf, []byte{96, 12, 19, 68, 0, 98, 17, 128})
 				packetsize = 40 + udpsize
@@ -101,10 +102,9 @@ func RedirectDNS(dnsAddr string, _port string, sendStartPort int, sendEndPort in
 			}
 
 			binary.BigEndian.PutUint16(rawbuf[ipheadlen+4:], uint16(udpsize))
-			copy(rawbuf[ipheadlen+8:], response)
-			packet := rawbuf[:packetsize]
-			divert.CalcChecksums(packet, &addr, 0)
-			_, err = winDivert.Send(packet, &addr)
+			copy(rawbuf[ipheadlen+udpheadlen:], dnsRecvBuf[:conRecvLen])
+			divert.CalcChecksums( rawbuf[:packetsize], &addr, 0)
+			_, err = winDivert.Send( rawbuf[:packetsize], &addr)
 			if err != nil {
 				log.Println(1, err)
 				return
