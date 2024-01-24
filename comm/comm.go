@@ -167,33 +167,12 @@ func IsPublicIP(ip net.IP) bool {
 	if ip.IsLoopback() || ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast() {
 		return false
 	}
-	// IPv4私有地址空间
-	// A类：10.0.0.0到10.255.255.255
-	// B类：172.16.0.0到172.31.255.255
-	// C类：192.168.0.0到192.168.255.255
-	if ip4 := ip.To4(); ip4 != nil {
-		switch true {
-		case ip4[0] == 10:
-			return false
-		case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
-			return false
-		case ip4[0] == 192 && ip4[1] == 168:
-			return false
-		case ip4[0] == 169 && ip4[1] == 254:
-			return false
-		default:
-			return true
-		}
-	}
-	// IPv6私有地址空间：以前缀FEC0::/10开头
-	if ip6 := ip.To16(); ip6 != nil {
-		if ip6[0] == 15 && ip6[1] == 14 && ip6[2] <= 12 {
-			return false
-		}
+	if !ip.IsPrivate() {
 		return true
 	}
 	return false
 }
+
 
 func AddRoute(tunAddr string, tunGw string, tunMask string) error {
 	var netNat = make([]string, 4)
