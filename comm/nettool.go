@@ -1,14 +1,11 @@
 package comm
 
 import (
-	"fmt"
 	"math/rand"
 	"net"
 	"strconv"
 	"strings"
 )
-
-
 
 /*根据子网掩码返回一个IP段*/
 func GetCidrRandIpByNet(tunAddr string, tunMask string) string {

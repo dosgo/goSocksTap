@@ -7,7 +7,7 @@ toolchain go1.21.4
 require (
 	github.com/StackExchange/wmi v1.2.1
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
-	github.com/dosgo/go-tun2socks v1.1.8
+	github.com/dosgo/go-tun2socks v1.1.9
 	github.com/imgk/divert-go v0.0.0-20220205193416-faaa83c2c10a
 	github.com/miekg/dns v1.1.57
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
