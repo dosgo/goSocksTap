@@ -8,15 +8,7 @@ import (
 	"strings"
 )
 
-func GetFreeUdpPort() (string, error) {
-	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
-	l, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		return "0", err
-	}
-	defer l.Close()
-	return fmt.Sprintf("%d", l.LocalAddr().(*net.UDPAddr).Port), nil
-}
+
 
 /*根据子网掩码返回一个IP段*/
 func GetCidrRandIpByNet(tunAddr string, tunMask string) string {
