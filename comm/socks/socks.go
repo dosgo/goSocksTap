@@ -106,9 +106,9 @@ func SocksUdpGate(conn core.CommUDPConn, gateAddr string, dstAddr *net.UDPAddr) 
 	go func() {
 		var buffer bytes.Buffer
 		var b1 = make([]byte, 1024*5)
-		var readLen=0;
+		var readLen = 0
 		for {
-			conn.SetReadDeadline(time.Now().Add(2 * time.Minute))
+			conn.SetReadDeadline(time.Now().Add(time.Second * 65))
 			readLen, err = conn.Read(b1)
 			if err != nil {
 				return
@@ -119,11 +119,11 @@ func SocksUdpGate(conn core.CommUDPConn, gateAddr string, dstAddr *net.UDPAddr) 
 			_, _ = gateConn.Write(buffer.Bytes())
 		}
 	}()
-	var readLen=0;
-	var dataStart=0;
+	var readLen = 0
+	var dataStart = 0
 	var b2 = make([]byte, 1024*5)
 	for {
-		gateConn.SetReadDeadline(time.Now().Add(2 * time.Minute))
+		gateConn.SetReadDeadline(time.Now().Add(time.Second * 65))
 		readLen, err = gateConn.Read(b2)
 		if err != nil {
 			return err
