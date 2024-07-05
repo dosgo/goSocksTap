@@ -257,8 +257,12 @@ func sendDns(dnsAddr string, port string, recvBuf []byte, recvLen uint, addr *di
 			ipHeader.Dst = srcHeader.Src // Assuming localhost IPv6 for example
 			ipHeader.PayloadLen = conRecvLen + udpHeadLen
 
-			copy(rawbuf[:4], []byte{96, 12, 19, 68})
+			VersionTrafficClassFlowLabel := [4]byte{6 << 4, 0, 0, 0}
+			copy(rawbuf[:4], VersionTrafficClassFlowLabel[:])
 			binary.BigEndian.PutUint16(rawbuf[4:], uint16(ipHeader.PayloadLen))
+
+			rawbuf[6] = 17  // NextHeader udp
+			rawbuf[7] = 255 // Default Hop Limit
 			//交换端口地址
 			if ip := ipHeader.Src.To16(); ip != nil {
 				copy(rawbuf[8:], ip[:net.IPv6len])
