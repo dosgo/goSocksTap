@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/imgk/divert-go"
+	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
 var winDivert *divert.Handle
@@ -29,6 +31,33 @@ var divertDll = "WinDivert.dll"
 var divertSys = "WinDivert32.sys"
 
 var removeRepeat sync.Map
+
+type UDPHeader struct {
+	SrcPort uint16
+	DstPort uint16
+	Length  uint16
+	Check   uint16
+}
+
+func (h *UDPHeader) Marshal() ([]byte, error) {
+	b := make([]byte, 8)
+	//写入udp头
+	binary.BigEndian.PutUint16(b[:], h.SrcPort)
+	binary.BigEndian.PutUint16(b[2:], h.DstPort)
+	binary.BigEndian.PutUint16(b[4:], h.Length)
+	return b, nil
+}
+
+func (h *UDPHeader) Parse(b []byte) error {
+	if len(b) < 8 {
+		return nil
+	}
+	h.SrcPort = binary.BigEndian.Uint16(b[:2])
+	h.DstPort = binary.BigEndian.Uint16(b[2:4])
+	h.Length = binary.BigEndian.Uint16(b[4:6])
+	h.Check = binary.BigEndian.Uint16(b[6:])
+	return nil
+}
 
 func dllInit(_divertDll string) {
 	_, err := os.Stat(_divertDll)
@@ -53,19 +82,9 @@ func RedirectDNS(dnsAddr string, _port string, sendStartPort int, sendEndPort in
 		log.Printf("winDivert open failed: %v\r\n", err)
 		return
 	}
-
-	rawbuf := make([]byte, 1500)
-	var dnsRecvBuf []byte = make([]byte, 1500)
 	var recvBuf []byte = make([]byte, 1500)
 	addr := divert.Address{}
-	var dnsConn net.Conn
-	dnsConn, _ = net.DialTimeout("udp", dnsAddr+":"+_port, time.Second*15)
-	var udpsize = 0
-	var packetsize int = 0
-	var ipheadlen int
 	var recvLen uint
-	var conRecvLen int
-	var udpheadlen = 8
 	for winDivertRun {
 		if winDivert == nil {
 			continue
@@ -75,52 +94,7 @@ func RedirectDNS(dnsAddr string, _port string, sendStartPort int, sendEndPort in
 			log.Println(1, err)
 			continue
 		}
-		ipv6 := recvBuf[0]>>4 == 6
-		if ipv6 {
-			ipheadlen = 40
-		} else {
-			ipheadlen = int(recvBuf[0]&0xF) * 4
-		}
-		dnsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		dnsConn.Write(recvBuf[ipheadlen+udpheadlen : recvLen])
-		dnsConn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		conRecvLen, err = dnsConn.Read(dnsRecvBuf)
-		if err == nil {
-			udpsize = conRecvLen + udpheadlen
-			if ipv6 {
-				copy(rawbuf, []byte{96, 12, 19, 68, 0, 98, 17, 128})
-				packetsize = 40 + udpsize
-				binary.BigEndian.PutUint16(rawbuf[4:], uint16(udpsize))
-				copy(rawbuf[8:], recvBuf[24:40])
-				copy(rawbuf[24:], recvBuf[8:24])
-				copy(rawbuf[ipheadlen:], recvBuf[ipheadlen+2:ipheadlen+4])
-				copy(rawbuf[ipheadlen+2:], recvBuf[ipheadlen:ipheadlen+2])
-			} else {
-				copy(rawbuf, []byte{69, 0, 1, 32, 141, 152, 64, 0, 64, 17, 150, 46})
-				packetsize = 20 + udpsize
-				binary.BigEndian.PutUint16(rawbuf[2:], uint16(packetsize))
-				copy(rawbuf[12:], recvBuf[16:20])
-				copy(rawbuf[16:], recvBuf[12:16])
-				copy(rawbuf[20:], recvBuf[ipheadlen+2:ipheadlen+4])
-				copy(rawbuf[22:], recvBuf[ipheadlen:ipheadlen+2])
-				ipheadlen = 20
-			}
-
-			binary.BigEndian.PutUint16(rawbuf[ipheadlen+4:], uint16(udpsize))
-			copy(rawbuf[ipheadlen+udpheadlen:], dnsRecvBuf[:conRecvLen])
-			divert.CalcChecksums(rawbuf[:packetsize], &addr, 0)
-			_, err = winDivert.Send(rawbuf[:packetsize], &addr)
-			if err != nil {
-				log.Println(1, err)
-				return
-			}
-		} else {
-			dnsConn.Close()
-			dnsConn, _ = net.DialTimeout("udp", dnsAddr+":"+_port, time.Second*15)
-		}
-	}
-	if dnsConn != nil {
-		dnsConn.Close()
+		sendDns(dnsAddr, _port, recvBuf, recvLen, &addr, "111")
 	}
 }
 
@@ -234,53 +208,101 @@ func RedirectDNSV2(dnsAddr string, _port string, sendStartPort int, sendEndPort 
 	}
 }
 
-func sendDns(dnsAddr string, _port string, recvBuf []byte, recvLen uint, addr *divert.Address, hash string) {
+func sendDns(dnsAddr string, port string, recvBuf []byte, recvLen uint, addr *divert.Address, hash string) {
 	defer removeRepeat.Delete(hash)
-	dnsConn, err := net.DialTimeout("udp", dnsAddr+":"+_port, time.Second*15)
+	dnsConn, err := net.DialTimeout("udp", dnsAddr+":"+port, 15*time.Second)
 	if err != nil {
 		return
 	}
 	defer dnsConn.Close()
-	var ipheadlen int
-	ipv6 := recvBuf[0]>>4 == 6
-	if ipv6 {
-		ipheadlen = 40
-	} else {
-		ipheadlen = int(recvBuf[0]&0xF) * 4
+
+	isIpv6 := recvBuf[0]>>4 == 6
+	ipHeadLen := 40 // Assuming IPv6 if not modified later
+	if !isIpv6 {
+		ipHeadLen = int(recvBuf[0]&0xF) * 4
 	}
+
+	// Create a buffer for the entire packet
 	rawbuf := make([]byte, 1500)
-	var udpsize = 0
-	var udpheadlen = 8
-	var packetsize int = 0
 	var dnsRecvBuf []byte = make([]byte, 1500)
+	var udpHeadLen = 8
 	dnsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	dnsConn.Write(recvBuf[ipheadlen+udpheadlen : recvLen])
+	dnsConn.Write(recvBuf[ipHeadLen+udpHeadLen : recvLen])
 	dnsConn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	conRecvLen, err := dnsConn.Read(dnsRecvBuf)
 	if err == nil {
-		udpsize = conRecvLen + udpheadlen
-		if ipv6 {
-			copy(rawbuf, []byte{96, 12, 19, 68, 0, 98, 17, 128})
-			packetsize = 40 + udpsize
-			binary.BigEndian.PutUint16(rawbuf[4:], uint16(udpsize))
-			copy(rawbuf[8:], recvBuf[24:40])
-			copy(rawbuf[24:], recvBuf[8:24])
-			copy(rawbuf[ipheadlen:], recvBuf[ipheadlen+2:ipheadlen+4])
-			copy(rawbuf[ipheadlen+2:], recvBuf[ipheadlen:ipheadlen+2])
+
+		srcUdpHeader := &UDPHeader{}
+		srcUdpHeader.Parse(recvBuf[ipHeadLen:])
+
+		// Define the UDP header
+		udpHeader := &UDPHeader{}
+		// Set UDP header fields
+		udpHeader.SrcPort = srcUdpHeader.DstPort
+		udpHeader.DstPort = srcUdpHeader.SrcPort
+		udpHeader.Length = uint16(conRecvLen + udpHeadLen)
+
+		// Set IP header fields based on IPv4 or IPv6
+		if isIpv6 {
+			srcHeader, err := ipv6.ParseHeader(recvBuf[:recvLen])
+			if err != nil {
+				return
+			}
+
+			ipHeader := &ipv6.Header{
+				Version: ipv6.Version, // Or 6 for IPv6
+			}
+			//交换源跟目的地址
+			ipHeader.Src = srcHeader.Dst // Assuming loopback address for example
+			ipHeader.Dst = srcHeader.Src // Assuming localhost IPv6 for example
+			ipHeader.PayloadLen = conRecvLen + udpHeadLen
+
+			copy(rawbuf[:4], []byte{96, 12, 19, 68})
+			binary.BigEndian.PutUint16(rawbuf[4:], uint16(ipHeader.PayloadLen))
+			//交换端口地址
+			if ip := ipHeader.Src.To16(); ip != nil {
+				copy(rawbuf[8:], ip[:net.IPv6len])
+			}
+			if ip := ipHeader.Dst.To16(); ip != nil {
+				copy(rawbuf[24:], ip[:net.IPv6len])
+			}
+
 		} else {
-			copy(rawbuf, []byte{69, 0, 1, 32, 141, 152, 64, 0, 64, 17, 150, 46})
-			packetsize = 20 + udpsize
-			binary.BigEndian.PutUint16(rawbuf[2:], uint16(packetsize))
-			copy(rawbuf[12:], recvBuf[16:20])
-			copy(rawbuf[16:], recvBuf[12:16])
-			copy(rawbuf[20:], recvBuf[ipheadlen+2:ipheadlen+4])
-			copy(rawbuf[22:], recvBuf[ipheadlen:ipheadlen+2])
+			srcHeader, err := ipv4.ParseHeader(recvBuf[:recvLen])
+			if err != nil {
+				return
+			}
+			ipHeader := &ipv4.Header{
+				Version:  ipv4.Version,   // Or 6 for IPv6
+				Len:      ipv4.HeaderLen, // For IPv4, assuming fixed header size
+				TOS:      0,              // Traffic class or Type of Service
+				TotalLen: 0,              // We'll calculate and set this later
+				ID:       0,              // Unique identifier for the packet
+				FragOff:  0,              // Fragment offset
+				TTL:      64,             // Time to live
+				Protocol: 17,             // UDP protocol
+			}
+			//交换源跟目的地址
+			ipHeader.Src = srcHeader.Dst
+			ipHeader.Dst = srcHeader.Src
+
+			//ip头包总大小
+			ipHeader.TotalLen = ipHeadLen + int(udpHeader.Length)
+			headBuf, _ := ipHeader.Marshal()
+			//写入ip头
+			copy(rawbuf[0:], headBuf)
+
 		}
 
-		binary.BigEndian.PutUint16(rawbuf[ipheadlen+4:], uint16(udpsize))
-		copy(rawbuf[ipheadlen+udpheadlen:], dnsRecvBuf[:conRecvLen])
-		divert.CalcChecksums(rawbuf[:packetsize], addr, 0)
-		_, err = winDivert.Send(rawbuf[:packetsize], addr)
+		//写入udp头
+		udpHeadBuf, _ := udpHeader.Marshal()
+		copy(rawbuf[ipHeadLen:], udpHeadBuf)
+
+		// 写入udp数据
+		copy(rawbuf[ipHeadLen+udpHeadLen:], dnsRecvBuf[:conRecvLen])
+
+		divert.CalcChecksums(rawbuf[:ipHeadLen+int(udpHeader.Length)], addr, 0)
+		_, err = winDivert.Send(rawbuf[:ipHeadLen+int(udpHeader.Length)], addr)
 		if err != nil {
 			log.Println(1, err)
 			return
