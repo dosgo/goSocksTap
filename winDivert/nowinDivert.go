@@ -9,6 +9,11 @@ func RedirectDNS(dnsAddr string, _port string, sendStartPort int, sendEndPort in
 }
 
 /*only windows*/
+func RedirectDNSV2(dnsAddr string, _port string, sendStartPort int, sendEndPort int) {
+
+}
+
+/*only windows*/
 func CloseWinDivert() {
 
 }
