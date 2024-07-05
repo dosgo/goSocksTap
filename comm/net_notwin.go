@@ -4,9 +4,11 @@
 package comm
 
 import (
+	"net"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/miekg/dns"
 	"github.com/songgao/water"
@@ -104,4 +106,10 @@ func ResetNetConf(ip string) {
 
 func CmdHide(name string, arg ...string) *exec.Cmd {
 	return exec.Command(name, arg...)
+}
+func GetPortDialer(min int, max int) *net.Dialer {
+	dialer := &net.Dialer{
+		Timeout: 10 * time.Second,
+	}
+	return dialer
 }

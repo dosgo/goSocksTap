@@ -55,7 +55,8 @@ type TunDns struct {
 	dnsAddrV6      string
 	dnsPort        string
 	ip2Domain      *bimap.BiMap[string, string]
-	sendStartPort  int
+	sendMinPort    int
+	sendMaxPort    int
 }
 
 var tunAddr = "10.0.0.2"
@@ -93,8 +94,11 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 		comm.SetNetConf(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsAddrV6)
 	}
 	if runtime.GOOS == "windows" {
-		fakeDns.tunDns.sendStartPort = 600
-		go winDivert.RedirectDNS(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort, fakeDns.tunDns.sendStartPort, fakeDns.tunDns.sendStartPort+5)
+		fakeDns.tunDns.sendMinPort = 600
+		fakeDns.tunDns.sendMaxPort = 700
+		go winDivert.RedirectDNSV2(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort, fakeDns.tunDns.sendMinPort, fakeDns.tunDns.sendMaxPort)
+		//go winDivert.NetEventv1(strconv.Itoa(fakeDns.tunDns.socksServerPid), true)
+		//go winDivert.RedirectDNSV1(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort)
 	}
 	//udp limit auto remove
 	fakeDns.run = true
@@ -303,26 +307,18 @@ func (tunDns *TunDns) Exchange(m *dns.Msg) (r *dns.Msg, rtt time.Duration, err e
 	if runtime.GOOS != "windows" {
 		return tunDns.dnsClient.Exchange(m, tunDns.srcDns)
 	}
-	var i = 0
-	for {
-		_dialer := &net.Dialer{Timeout: 10 * time.Second, LocalAddr: &net.UDPAddr{Port: tunDns.sendStartPort + i}}
-		conn, err1 := _dialer.Dial("udp", tunDns.srcDns)
-		if err1 == nil {
-			defer conn.Close()
-			//windows 使用虚拟udp不然会被劫持
-			dnsClientConn := new(dns.Conn)
-			dnsClientConn.Conn = conn
-			dnsClientConn.UDPSize = 4096
-			defer dnsClientConn.Close()
-			return tunDns.dnsClient.ExchangeWithConn(m, dnsClientConn)
-		}
-		if i >= 5 {
-			break
-		}
+	_dialer := comm.GetPortDialer(tunDns.sendMinPort, tunDns.sendMaxPort)
+	conn, err1 := _dialer.Dial("udp", tunDns.srcDns)
+	if err1 == nil {
+		defer conn.Close()
+		//windows 使用虚拟udp不然会被劫持
+		dnsClientConn := new(dns.Conn)
+		dnsClientConn.Conn = conn
+		dnsClientConn.UDPSize = 4096
+		defer dnsClientConn.Close()
+		return tunDns.dnsClient.ExchangeWithConn(m, dnsClientConn)
 	}
-
 	return nil, 0, errors.New("port use.")
-
 }
 
 func (tunDns *TunDns) Shutdown() {
