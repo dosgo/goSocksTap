@@ -100,7 +100,7 @@ func GetNetworkAdapter() ([]NetworkAdapter, error) {
 	}
 	return s, nil
 }
-func SetNetConf(dnsIpv4 string, dnsIpv6 string) {
+func SetNetConf(dnsIpv4 string) {
 
 }
 
