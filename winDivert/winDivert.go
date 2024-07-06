@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"math/rand"
+
 	"github.com/imgk/divert-go"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -277,14 +279,14 @@ func sendDns(dnsAddr string, port string, recvBuf []byte, recvLen uint, addr *di
 				return
 			}
 			ipHeader := &ipv4.Header{
-				Version:  ipv4.Version,   // Or 6 for IPv6
-				Len:      ipv4.HeaderLen, // For IPv4, assuming fixed header size
-				TOS:      0,              // Traffic class or Type of Service
-				TotalLen: 0,              // We'll calculate and set this later
-				ID:       0,              // Unique identifier for the packet
-				FragOff:  0,              // Fragment offset
-				TTL:      64,             // Time to live
-				Protocol: 17,             // UDP protocol
+				Version:  ipv4.Version,     // Or 6 for IPv6
+				Len:      ipv4.HeaderLen,   // For IPv4, assuming fixed header size
+				TOS:      0,                // Traffic class or Type of Service
+				TotalLen: 0,                // We'll calculate and set this later
+				ID:       rand.Intn(65535), // Unique identifier for the packet
+				FragOff:  0,                // Fragment offset
+				TTL:      64,               // Time to live
+				Protocol: 17,               // UDP protocol
 			}
 			//交换源跟目的地址
 			ipHeader.Src = srcHeader.Dst
