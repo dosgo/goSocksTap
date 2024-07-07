@@ -109,6 +109,7 @@ func (tunDns *TunDnsV1) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	var err error
 	_, excludeFlag := tunDns.excludeDomains.Load(domain)
 	if ok && !excludeFlag && qtype == dns.TypeA {
+		log.Println("cache  allocIp dns:" + domain)
 		response = tunDns.overrideResponse(r, ipLog, 1)
 	} else {
 		if excludeFlag {
@@ -127,7 +128,9 @@ func (tunDns *TunDnsV1) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 			// 修改特定 IP 的响应
 			tunDns.modifyResponse(response, domain, qtype)
 		} else {
+			log.Println("cache dns:" + domain)
 			response = cacheResp
+			response.SetReply(r)
 		}
 	}
 
@@ -151,7 +154,7 @@ func (tunDns *TunDnsV1) overrideResponse(msg *dns.Msg, ip string, ttl uint32) *d
 
 func (tunDns *TunDnsV1) modifyResponse(msg *dns.Msg, domain string, qtype uint16) {
 
-	isEdit := false
+	var isEdit = false
 	for i, ans := range msg.Answer {
 		switch a := ans.(type) {
 		case *dns.A:
@@ -172,7 +175,7 @@ func (tunDns *TunDnsV1) modifyResponse(msg *dns.Msg, domain string, qtype uint16
 		}
 	}
 	//没有修改过的缓存
-	if !isEdit {
+	if !isEdit && msg.Rcode == dns.RcodeSuccess {
 		tunDns.dnsCache.WriteDnsCache(domain+fmt.Sprintf("%d", qtype), msg)
 	}
 	msg.Authoritative = false
