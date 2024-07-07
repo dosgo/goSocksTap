@@ -167,7 +167,7 @@ func GetPortDialer(min int, max int) *net.Dialer {
 		Timeout: 10 * time.Second,
 		Control: func(network, address string, c syscall.RawConn) error {
 			var err error
-			for attempt := 0; attempt < 2; attempt++ { // 尝试最多两次
+			for attempt := 0; attempt < 3; attempt++ { // 尝试最多两次
 				err = c.Control(func(fd uintptr) {
 					syscall.Bind(syscall.Handle(fd), &syscall.SockaddrInet4{
 						Port: rand.Intn(max-min) + min, // 随机选择一个端口

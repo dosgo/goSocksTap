@@ -6,6 +6,7 @@ import (
 	"net"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dosgo/goSocksTap/comm"
@@ -14,11 +15,12 @@ import (
 )
 
 type TunDnsV1 struct {
-	dnsClient      *dns.Client
-	srcDns         string
-	run            bool
-	udpServer      *dns.Server
-	excludeDomains map[string]uint8
+	dnsClient *dns.Client
+	srcDns    string
+	run       bool
+	udpServer *dns.Server
+	//excludeDomains      map[string]uint8
+	excludeDomains sync.Map
 	dnsAddr        string
 	dnsPort        string
 	ip2Domain      *bimap.BiMap[string, string]
@@ -27,7 +29,6 @@ type TunDnsV1 struct {
 }
 
 func (tunDns *TunDnsV1) Exchange(m *dns.Msg) (r *dns.Msg, rtt time.Duration, err error) {
-
 	if runtime.GOOS != "windows" {
 		return tunDns.dnsClient.Exchange(m, tunDns.srcDns)
 	}
@@ -98,13 +99,17 @@ func (tunDns *TunDnsV1) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	ipLog, ok := tunDns.ip2Domain.GetInverse(domain)
 	var response *dns.Msg
 	var err error
-	if ok && r.Question[0].Qtype == dns.TypeA {
+	_, excludeFlag := tunDns.excludeDomains.Load(domain)
+	if ok && !excludeFlag && r.Question[0].Qtype == dns.TypeA {
 		response = tunDns.overrideResponse(r, ipLog, 1)
 	} else {
+		if excludeFlag {
+			tunDns.ip2Domain.DeleteInverse(domain)
+		}
 		// 转发请求到目标 DNS 服务器
 		response, _, err = tunDns.Exchange(r)
 		if err != nil {
-			log.Println(err)
+			log.Println("ServeDNS err:" + err.Error())
 			return
 		}
 		// 修改特定 IP 的响应
@@ -134,7 +139,7 @@ func (tunDns *TunDnsV1) modifyResponse(msg *dns.Msg, domain string) {
 		switch a := ans.(type) {
 		case *dns.A:
 			srcIp := a.A.String()
-			_, excludeFlag := tunDns.excludeDomains[domain]
+			_, excludeFlag := tunDns.excludeDomains.Load(domain)
 			//不是中国ip,又不是排除的ip
 			if !excludeFlag && !comm.IsChinaMainlandIP(srcIp) && comm.IsPublicIP(a.A) {
 				ip := tunDns.allocIpByDomain(domain)

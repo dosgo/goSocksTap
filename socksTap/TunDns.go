@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dosgo/goSocksTap/comm"
@@ -21,12 +22,13 @@ func init() {
 }
 
 type TunDns struct {
-	dnsClient      *dns.Client
-	srcDns         string
-	udpServer      *dns.Server
-	tcpServer      *dns.Server
-	run            bool
-	excludeDomains map[string]uint8
+	dnsClient *dns.Client
+	srcDns    string
+	udpServer *dns.Server
+	tcpServer *dns.Server
+	run       bool
+	//excludeDomains      map[string]uint8
+	excludeDomains sync.Map
 	dnsAddr        string
 	dnsPort        string
 	ip2Domain      *bimap.BiMap[string, string]
@@ -126,7 +128,7 @@ func (tunDns *TunDns) ipv4Res(domain string) (*dns.A, error) {
 	var dnsErr = false
 	var backErr error = nil
 	ipLog, ok := tunDns.ip2Domain.GetInverse(domain)
-	_, excludeFlag := tunDns.excludeDomains[domain]
+	_, excludeFlag := tunDns.excludeDomains.Load(domain)
 
 	if ok && !excludeFlag && strings.HasPrefix(ipLog, tunAddr[0:4]) {
 		ip = ipLog

@@ -46,20 +46,20 @@ func TunNatSawp(_udpNat *sync.Map, conn core.CommUDPConn, ep core.CommEndpoint, 
 			defer _remoteConn.Close()
 			defer _conn.Close()
 			//buf:= make([]byte, 1024*5);
-			var readLen=0;
+			var readLen = 0
 			for {
 				_remoteConn.SetReadDeadline(time.Now().Add(duration))
 				buf := poolNatBuf.Get().([]byte)
 				readLen, err = _remoteConn.Read(buf)
 				if err != nil {
-					log.Printf("err:%v\r\n", err)
+					log.Printf("TunNatSawp err:%v\r\n", err)
 					return
 				}
 				buffer.Reset()
 				buffer.Write(buf[:readLen])
 				_, err = _conn.Write(buffer.Bytes())
 				if err != nil {
-					log.Printf("err:%v\r\n", err)
+					log.Printf("TunNatSawp err1:%v\r\n", err)
 				}
 				poolNatBuf.Put(buf)
 			}
@@ -72,7 +72,7 @@ func TunNatSawp(_udpNat *sync.Map, conn core.CommUDPConn, ep core.CommEndpoint, 
 	if err == nil {
 		_, err = remoteConn.Write(buf[:udpSize])
 		if err != nil {
-			log.Printf("err:%v\r\n", err)
+			log.Printf("TunNatSawp err2:%v\r\n", err)
 		}
 	}
 	poolNatBuf.Put(buf)
@@ -172,7 +172,6 @@ func IsPublicIP(ip net.IP) bool {
 	}
 	return false
 }
-
 
 func AddRoute(tunAddr string, tunGw string, tunMask string) error {
 	var netNat = make([]string, 4)

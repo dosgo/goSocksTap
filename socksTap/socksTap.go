@@ -1,6 +1,7 @@
 package socksTap
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -27,7 +28,7 @@ type SocksTap struct {
 	localSocks     string
 	udpLimit       sync.Map
 	run            bool
-	tunDns         *TunDns
+	tunDns         *TunDnsV1
 	socksServerPid int
 	safeDns        *dot.DoT
 	udpProxy       bool
@@ -46,10 +47,11 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 	tunAddr, tunGW = comm.GetUnusedTunAddr()
 	fakeDns.safeDns = dot.NewDot("dns.google", "8.8.8.8:853", localSocks)
 	//start local dns
-	fakeDns.tunDns = &TunDns{dnsPort: "53", dnsAddr: tunAddr}
-	//fakeDns.tunDns = &TunDnsV1{dnsPort: "53", dnsAddr: tunAddr}
+	//fakeDns.tunDns = &TunDns{dnsPort: "53", dnsAddr: tunAddr}
+	fakeDns.tunDns = &TunDnsV1{dnsPort: "53", dnsAddr: tunAddr}
+	fakeDns.tunDns.sendMinPort = 600
+	fakeDns.tunDns.sendMaxPort = 700
 	fakeDns.tunDns.ip2Domain = bimap.NewBiMap[string, string]()
-	fakeDns.tunDns.excludeDomains = make(map[string]uint8)
 	if runtime.GOOS == "windows" {
 		fakeDns.socksServerPid, _ = netstat.PortGetPid(localSocks)
 		fakeDns.tunDns.dnsPort = "653" //为了避免死循环windows使用653端口
@@ -58,7 +60,7 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 	if excludeDomain != "" {
 		excludeDomainList := strings.Split(excludeDomain, ";")
 		for i := 0; i < len(excludeDomainList); i++ {
-			fakeDns.tunDns.excludeDomains[excludeDomainList[i]+"."] = 1
+			fakeDns.tunDns.excludeDomains.Store(excludeDomainList[i]+".", 1)
 		}
 	}
 
@@ -69,8 +71,6 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 		comm.SetNetConf(fakeDns.tunDns.dnsAddr)
 	}
 	if runtime.GOOS == "windows" {
-		fakeDns.tunDns.sendMinPort = 600
-		fakeDns.tunDns.sendMaxPort = 700
 		go winDivert.RedirectDNSV2(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort, fakeDns.tunDns.sendMinPort, fakeDns.tunDns.sendMaxPort)
 		//go winDivert.NetEventv1(strconv.Itoa(fakeDns.tunDns.socksServerPid), true)
 		//go winDivert.RedirectDNSV1(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort)
@@ -136,7 +136,8 @@ func (fakeDns *SocksTap) tcpForwarder(conn core.CommTCPConn) error {
 		}
 		remoteAddrs := strings.Split(remoteAddr, ":")
 		domain := remoteAddrs[0]
-		fakeDns.tunDns.excludeDomains[domain] = 1 //标记为跳过代理域名
+		fakeDns.tunDns.excludeDomains.Store(domain, 1) //标记为跳过代理域名
+		fmt.Printf("add excludeDomains domain:%s\r\n", domain)
 		localIp, _, err := fakeDns.tunDns.localResolve(domain, 4)
 		if err != nil {
 			log.Printf("localIp:%s srcAddr:%s domain:%s\r\n", localIp.String(), srcAddr, domain[0:len(domain)-1])
@@ -144,7 +145,7 @@ func (fakeDns *SocksTap) tcpForwarder(conn core.CommTCPConn) error {
 		}
 		socksConn, err := net.DialTimeout("tcp", localIp.String()+":"+remoteAddrs[1], time.Second*15)
 		if err != nil {
-			log.Printf("err:%v", err)
+			log.Printf("tcpForwarder err:%v", err)
 			return nil
 		}
 		defer socksConn.Close()
@@ -160,7 +161,7 @@ func (fakeDns *SocksTap) tcpForwarder(conn core.CommTCPConn) error {
 		}
 		socksConn, err := net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
 		if err != nil {
-			log.Printf("err:%v", err)
+			log.Printf("tcpForwarder err2:%v", err)
 			return nil
 		}
 		defer socksConn.Close()

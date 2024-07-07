@@ -215,7 +215,7 @@ func SocksCmd(socksConn net.Conn, cmd uint8, addrType uint8, host string, readBa
 	authBack := make([]byte, 2)
 	_, err := io.ReadFull(socksConn, authBack)
 	if err != nil {
-		log.Println(err)
+		log.Println("SocksCmd err:" + err.Error())
 		return err
 	}
 	if authBack[0] != 0x05 || authBack[1] != 0x00 {
@@ -228,7 +228,7 @@ func SocksCmd(socksConn net.Conn, cmd uint8, addrType uint8, host string, readBa
 		connectBack := make([]byte, 10)
 		_, err = io.ReadFull(socksConn, connectBack)
 		if err != nil {
-			log.Println(err)
+			log.Println("SocksCmd err1:" + err.Error())
 			return err
 		}
 	}
