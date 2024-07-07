@@ -115,7 +115,7 @@ func (tunDns *TunDnsV1) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 			tunDns.ip2Domain.DeleteInverse(domain)
 		}
 
-		cacheResp := dnsCache1.ReadDnsCache(domain + fmt.Sprintf("%d", qtype))
+		cacheResp := dnsCache1.ReadDnsCache(domain+fmt.Sprintf("%d", qtype), 120)
 
 		if cacheResp == nil {
 			// 转发请求到目标 DNS 服务器

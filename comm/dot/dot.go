@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-var dnsCache *comm.DnsCache
+var dnsCache *comm.DnsCacheV1
 
 type DoT struct {
 	Addr          string
@@ -27,7 +27,7 @@ type DoT struct {
 }
 
 func init() {
-	dnsCache = &comm.DnsCache{Cache: make(map[string]comm.IpInfo, 128)}
+	dnsCache = &comm.DnsCacheV1{Cache: make(map[string]comm.CachedResponse, 128)}
 }
 
 func NewDot(serverName string, addr string, lSocks string) *DoT {
@@ -80,9 +80,12 @@ func (rd *DoT) Resolve(remoteHost string, ipType int) (string, error) {
 	}
 	var ip = ""
 	var err error
-	cache, _ := dnsCache.ReadDnsCache(remoteHost + ":" + strconv.Itoa(ipType))
-	if cache != "" {
-		return cache, nil
+	cacheRes := dnsCache.ReadDnsCache(remoteHost+":"+strconv.Itoa(ipType), 120)
+	if cacheRes != nil {
+		ip, err = rd.getIP(cacheRes, ipType)
+		if err == nil {
+			return ip, err
+		}
 	}
 
 	for i := 0; i < 2; i++ {
@@ -96,27 +99,34 @@ func (rd *DoT) Resolve(remoteHost string, ipType int) (string, error) {
 		}
 		response, _, err := rd.dnsClient.ExchangeWithConn(query, rd.dnsClientConn)
 		if err == nil {
-			for _, v := range response.Answer {
-				if ipType == 4 {
-					record, isType := v.(*dns.A)
-					if isType {
-						ip = record.A.String()
-						dnsCache.WriteDnsCache(remoteHost+":"+strconv.Itoa(ipType), record.Hdr.Ttl, ip)
-						return ip, nil
-					}
-				}
-				if ipType == 6 {
-					record, isType := v.(*dns.AAAA)
-					if isType {
-						ip = record.AAAA.String()
-						dnsCache.WriteDnsCache(remoteHost+":"+strconv.Itoa(ipType), record.Hdr.Ttl, ip)
-						return ip, nil
-					}
-				}
+			dnsCache.WriteDnsCache(remoteHost+":"+strconv.Itoa(ipType), response)
+			ip, err = rd.getIP(response, ipType)
+			if err == nil {
+				return ip, err
 			}
 		} else {
 			rd.connect = false
 		}
 	}
 	return ip, err
+}
+
+func (rd *DoT) getIP(response *dns.Msg, ipType int) (string, error) {
+	for _, v := range response.Answer {
+		if ipType == 4 {
+			record, isType := v.(*dns.A)
+			if isType {
+				ip := record.A.String()
+				return ip, nil
+			}
+		}
+		if ipType == 6 {
+			record, isType := v.(*dns.AAAA)
+			if isType {
+				ip := record.AAAA.String()
+				return ip, nil
+			}
+		}
+	}
+	return "", errors.New("not ")
 }
