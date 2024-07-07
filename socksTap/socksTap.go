@@ -48,9 +48,10 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 	fakeDns.safeDns = dot.NewDot("dns.google", "8.8.8.8:853", localSocks)
 	//start local dns
 	//fakeDns.tunDns = &TunDns{dnsPort: "53", dnsAddr: tunAddr}
-	fakeDns.tunDns = &TunDnsV1{dnsPort: "53", dnsAddr: tunAddr}
+	fakeDns.tunDns = NewTunDns(tunAddr, "53")
 	fakeDns.tunDns.sendMinPort = 600
 	fakeDns.tunDns.sendMaxPort = 700
+
 	fakeDns.tunDns.ip2Domain = bimap.NewBiMap[string, string]()
 	if runtime.GOOS == "windows" {
 		fakeDns.socksServerPid, _ = netstat.PortGetPid(localSocks)
@@ -120,6 +121,7 @@ func (fakeDns *SocksTap) task() {
 				fakeDns.socksServerPid = pid
 			}
 		}
+		fakeDns.safeDns.AutoFree()
 		time.Sleep(time.Second * 30)
 	}
 }

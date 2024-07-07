@@ -15,24 +15,24 @@ import (
 	"github.com/vishalkuo/bimap"
 )
 
-var dnsCache1 *comm.DnsCacheV1
-
-func init() {
-	dnsCache1 = &comm.DnsCacheV1{Cache: make(map[string]comm.CachedResponse, 128)}
-}
-
 type TunDnsV1 struct {
 	srcDns    string
+	dnsCache  *comm.DnsCacheV1
 	run       bool
 	udpServer *dns.Server
 	//excludeDomains      map[string]uint8
 	excludeDomains sync.Map
 	dnsAddr        string
-	cache          sync.Map
 	dnsPort        string
 	ip2Domain      *bimap.BiMap[string, string]
 	sendMinPort    int
 	sendMaxPort    int
+}
+
+func NewTunDns(addr string, port string) *TunDnsV1 {
+	tunDns := &TunDnsV1{dnsPort: port, dnsAddr: addr}
+	tunDns.dnsCache = &comm.DnsCacheV1{Cache: make(map[string]comm.CachedResponse, 128)}
+	return tunDns
 }
 
 func (tunDns *TunDnsV1) Exchange(m *dns.Msg) (r *dns.Msg, rtt time.Duration, err error) {
@@ -115,7 +115,7 @@ func (tunDns *TunDnsV1) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 			tunDns.ip2Domain.DeleteInverse(domain)
 		}
 
-		cacheResp := dnsCache1.ReadDnsCache(domain+fmt.Sprintf("%d", qtype), 120)
+		cacheResp := tunDns.dnsCache.ReadDnsCache(domain+fmt.Sprintf("%d", qtype), 120)
 
 		if cacheResp == nil {
 			// 转发请求到目标 DNS 服务器
@@ -173,7 +173,7 @@ func (tunDns *TunDnsV1) modifyResponse(msg *dns.Msg, domain string, qtype uint16
 	}
 	//没有修改过的缓存
 	if !isEdit {
-		dnsCache1.WriteDnsCache(domain+fmt.Sprintf("%d", qtype), msg)
+		tunDns.dnsCache.WriteDnsCache(domain+fmt.Sprintf("%d", qtype), msg)
 	}
 	msg.Authoritative = false
 }
@@ -198,7 +198,7 @@ func (tunDns *TunDnsV1) allocIpByDomain(domain string) string {
 /*dns缓存自动清理*/
 func (tunDns *TunDnsV1) clearDnsCache() {
 	for tunDns.run {
-		dnsCache1.Free()
+		tunDns.dnsCache.Free(120)
 		time.Sleep(time.Second * 60)
 	}
 }

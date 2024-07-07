@@ -14,9 +14,8 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-var dnsCache *comm.DnsCacheV1
-
 type DoT struct {
+	dnsCache      *comm.DnsCacheV1
 	Addr          string
 	LSocks        string
 	ServerName    string
@@ -26,12 +25,10 @@ type DoT struct {
 	connect       bool
 }
 
-func init() {
-	dnsCache = &comm.DnsCacheV1{Cache: make(map[string]comm.CachedResponse, 128)}
-}
-
 func NewDot(serverName string, addr string, lSocks string) *DoT {
-	return &DoT{ServerName: serverName, Addr: addr, LSocks: lSocks, Singleflight: &singleflight.Group{}}
+	dot := &DoT{ServerName: serverName, Addr: addr, LSocks: lSocks, Singleflight: &singleflight.Group{}}
+	dot.dnsCache = &comm.DnsCacheV1{Cache: make(map[string]comm.CachedResponse, 128)}
+	return dot
 }
 
 func (rd *DoT) Connect() error {
@@ -80,7 +77,7 @@ func (rd *DoT) Resolve(remoteHost string, ipType int) (string, error) {
 	}
 	var ip = ""
 	var err error
-	cacheRes := dnsCache.ReadDnsCache(remoteHost+":"+strconv.Itoa(ipType), 120)
+	cacheRes := rd.dnsCache.ReadDnsCache(remoteHost+":"+strconv.Itoa(ipType), 120)
 	if cacheRes != nil {
 		ip, err = rd.getIP(cacheRes, ipType)
 		if err == nil {
@@ -99,7 +96,7 @@ func (rd *DoT) Resolve(remoteHost string, ipType int) (string, error) {
 		}
 		response, _, err := rd.dnsClient.ExchangeWithConn(query, rd.dnsClientConn)
 		if err == nil {
-			dnsCache.WriteDnsCache(remoteHost+":"+strconv.Itoa(ipType), response)
+			rd.dnsCache.WriteDnsCache(remoteHost+":"+strconv.Itoa(ipType), response)
 			ip, err = rd.getIP(response, ipType)
 			if err == nil {
 				return ip, err
@@ -129,4 +126,8 @@ func (rd *DoT) getIP(response *dns.Msg, ipType int) (string, error) {
 		}
 	}
 	return "", errors.New("not ")
+}
+
+func (rd *DoT) AutoFree() {
+	rd.dnsCache.Free(120)
 }
