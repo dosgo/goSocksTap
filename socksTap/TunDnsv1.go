@@ -2,6 +2,7 @@ package socksTap
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"runtime"
@@ -14,14 +15,20 @@ import (
 	"github.com/vishalkuo/bimap"
 )
 
+var dnsCache1 *comm.DnsCacheV1
+
+func init() {
+	dnsCache1 = &comm.DnsCacheV1{Cache: make(map[string]comm.CachedResponse, 128)}
+}
+
 type TunDnsV1 struct {
-	dnsClient *dns.Client
 	srcDns    string
 	run       bool
 	udpServer *dns.Server
 	//excludeDomains      map[string]uint8
 	excludeDomains sync.Map
 	dnsAddr        string
+	cache          sync.Map
 	dnsPort        string
 	ip2Domain      *bimap.BiMap[string, string]
 	sendMinPort    int
@@ -29,8 +36,15 @@ type TunDnsV1 struct {
 }
 
 func (tunDns *TunDnsV1) Exchange(m *dns.Msg) (r *dns.Msg, rtt time.Duration, err error) {
+	dnsClient := &dns.Client{
+		Net:            "udp",
+		UDPSize:        4096,
+		SingleInflight: false,
+		ReadTimeout:    time.Duration(10) * time.Second,
+		WriteTimeout:   time.Duration(10) * time.Second,
+	}
 	if runtime.GOOS != "windows" {
-		return tunDns.dnsClient.Exchange(m, tunDns.srcDns)
+		return dnsClient.Exchange(m, tunDns.srcDns)
 	}
 	_dialer := comm.GetPortDialer(tunDns.sendMinPort, tunDns.sendMaxPort)
 	conn, err := _dialer.Dial("udp", tunDns.srcDns)
@@ -40,7 +54,7 @@ func (tunDns *TunDnsV1) Exchange(m *dns.Msg) (r *dns.Msg, rtt time.Duration, err
 		dnsClientConn.Conn = conn
 		dnsClientConn.UDPSize = 4096
 		defer dnsClientConn.Close()
-		return tunDns.dnsClient.ExchangeWithConn(m, dnsClientConn)
+		return dnsClient.ExchangeWithConn(m, dnsClientConn)
 	}
 	return nil, 0, errors.New("port use.")
 }
@@ -81,39 +95,40 @@ func (tunDns *TunDnsV1) StartSmartDns() {
 		WriteTimeout: time.Duration(10) * time.Second,
 	}
 
-	tunDns.dnsClient = &dns.Client{
-		Net:            "udp",
-		UDPSize:        4096,
-		SingleInflight: false,
-		ReadTimeout:    time.Duration(10) * time.Second,
-		WriteTimeout:   time.Duration(10) * time.Second,
-	}
-
 	tunDns.srcDns = comm.GetUseDns(tunDns.dnsAddr, tunGW, "") + ":53"
 	go tunDns.udpServer.ListenAndServe()
 	go tunDns.checkDnsChange()
+	go tunDns.clearDnsCache()
 }
 
 func (tunDns *TunDnsV1) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	domain := r.Question[0].Name
+	qtype := r.Question[0].Qtype
 	ipLog, ok := tunDns.ip2Domain.GetInverse(domain)
 	var response *dns.Msg
 	var err error
 	_, excludeFlag := tunDns.excludeDomains.Load(domain)
-	if ok && !excludeFlag && r.Question[0].Qtype == dns.TypeA {
+	if ok && !excludeFlag && qtype == dns.TypeA {
 		response = tunDns.overrideResponse(r, ipLog, 1)
 	} else {
 		if excludeFlag {
 			tunDns.ip2Domain.DeleteInverse(domain)
 		}
-		// 转发请求到目标 DNS 服务器
-		response, _, err = tunDns.Exchange(r)
-		if err != nil {
-			log.Println("ServeDNS err:" + err.Error())
-			return
+
+		cacheResp := dnsCache1.ReadDnsCache(domain + fmt.Sprintf("%d", qtype))
+
+		if cacheResp == nil {
+			// 转发请求到目标 DNS 服务器
+			response, _, err = tunDns.Exchange(r)
+			if err != nil {
+				log.Println("ServeDNS domain:" + domain + " err:" + err.Error())
+				return
+			}
+			// 修改特定 IP 的响应
+			tunDns.modifyResponse(response, domain, qtype)
+		} else {
+			response = cacheResp
 		}
-		// 修改特定 IP 的响应
-		tunDns.modifyResponse(response, domain)
 	}
 
 	if err != nil {
@@ -134,7 +149,9 @@ func (tunDns *TunDnsV1) overrideResponse(msg *dns.Msg, ip string, ttl uint32) *d
 	return resp
 }
 
-func (tunDns *TunDnsV1) modifyResponse(msg *dns.Msg, domain string) {
+func (tunDns *TunDnsV1) modifyResponse(msg *dns.Msg, domain string, qtype uint16) {
+
+	isEdit := false
 	for i, ans := range msg.Answer {
 		switch a := ans.(type) {
 		case *dns.A:
@@ -146,12 +163,17 @@ func (tunDns *TunDnsV1) modifyResponse(msg *dns.Msg, domain string) {
 				a.A = net.ParseIP(ip)
 				a.Hdr.Ttl = 1
 				msg.Answer[i] = a
+				isEdit = true
 			}
 		case *dns.AAAA:
 			//if a.AAAA.String() == specificIP {
 			//a.AAAA = net.ParseIP(specificIP)
 			//}
 		}
+	}
+	//没有修改过的缓存
+	if !isEdit {
+		dnsCache1.WriteDnsCache(domain+fmt.Sprintf("%d", qtype), msg)
 	}
 	msg.Authoritative = false
 }
@@ -171,6 +193,14 @@ func (tunDns *TunDnsV1) allocIpByDomain(domain string) string {
 		}
 	}
 	return ip
+}
+
+/*dns缓存自动清理*/
+func (tunDns *TunDnsV1) clearDnsCache() {
+	for tunDns.run {
+		dnsCache1.Free()
+		time.Sleep(time.Second * 60)
+	}
 }
 
 /*
