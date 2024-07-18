@@ -12,8 +12,10 @@ require (
 	github.com/imgk/divert-go v0.0.0-20220205193416-faaa83c2c10a
 	github.com/miekg/dns v1.1.59
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
+	github.com/txthinking/socks5 v0.0.0-20230325130024-4230056ae301
 	github.com/vishalkuo/bimap v0.0.0-20230830142743-a9fb9b52066c
 	github.com/yl2chen/cidranger v1.0.2
+	golang.org/x/net v0.25.0
 	golang.org/x/sync v0.7.0
 	golang.org/x/time v0.5.0
 )
@@ -21,9 +23,10 @@ require (
 require (
 	github.com/go-ole/go-ole v1.2.5 // indirect
 	github.com/google/btree v1.1.2 // indirect
+	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
+	github.com/txthinking/runnergroup v0.0.0-20210608031112-152c7c4432bf // indirect
 	golang.org/x/crypto v0.24.0 // indirect
 	golang.org/x/mod v0.17.0 // indirect
-	golang.org/x/net v0.25.0 // indirect
 	golang.org/x/sys v0.21.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect

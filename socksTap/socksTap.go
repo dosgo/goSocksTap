@@ -7,7 +7,6 @@ import (
 	"net"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dosgo/goSocksTap/comm"
@@ -20,26 +19,24 @@ import (
 	"github.com/dosgo/go-tun2socks/tun"
 	"github.com/dosgo/go-tun2socks/tun2socks"
 
+	"github.com/txthinking/socks5"
 	"github.com/vishalkuo/bimap"
-	"golang.org/x/time/rate"
 )
 
 type SocksTap struct {
 	localSocks     string
-	udpLimit       sync.Map
 	run            bool
 	tunDns         *TunDnsV1
 	socksServerPid int
 	safeDns        *dot.DoT
 	udpProxy       bool
 	tunDev         io.ReadWriteCloser
+	udpProxyServer *UdpProxy
 }
 
 var tunAddr = "10.0.0.2"
 var tunGW = "10.0.0.1"
 var tunMask = "255.255.0.0"
-var fakeUdpNat sync.Map
-var ipv6To4 sync.Map
 
 func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy bool) {
 	fakeDns.localSocks = localSocks
@@ -66,6 +63,10 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 	}
 
 	fakeDns.tunDns.StartSmartDns()
+
+	fakeDns.udpProxyServer = NewUdpProxy(":9999")
+
+	go fakeDns.udpProxyServer.Start()
 
 	//edit DNS
 	if runtime.GOOS != "windows" {
@@ -108,13 +109,6 @@ func (fakeDns *SocksTap) _startTun(mtu int) error {
 }
 func (fakeDns *SocksTap) task() {
 	for fakeDns.run {
-		fakeDns.udpLimit.Range(func(k, v interface{}) bool {
-			_v := v.(*comm.UdpLimit)
-			if _v.Expired < time.Now().Unix() {
-				fakeDns.udpLimit.Delete(k)
-			}
-			return true
-		})
 		if runtime.GOOS == "windows" {
 			pid, err := netstat.PortGetPid(fakeDns.localSocks)
 			if err == nil && pid > 0 {
@@ -183,39 +177,53 @@ func (fakeDns *SocksTap) udpForwarder(conn core.CommUDPConn, ep core.CommEndpoin
 		return nil
 	}
 	if fakeDns.udpProxy {
-		socksConn, err := net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
-		if err == nil {
-			defer socksConn.Close()
-			gateWay, err := socks.GetUdpGate(socksConn, remoteAddr)
-			log.Printf("gateWay:%s %v\r\n", gateWay, err)
-			if err == nil {
-				defer ep.Close()
-				dstAddr, _ := net.ResolveUDPAddr("udp", remoteAddr)
-				log.Printf("udp-remoteAddr:%s\r\n", remoteAddr)
-				return socks.SocksUdpGate(conn, gateWay, dstAddr)
-			}
-		}
+		fakeDns.UdpSocks5(fakeDns.localSocks, remoteAddr, conn, ep)
 	}
-	fakeDns.UdpDirect(remoteAddr, conn, ep)
+	fakeDns.UdpDirectv1(remoteAddr, conn, ep)
 	return nil
 }
 
-/*直连*/
-func (fakeDns *SocksTap) UdpDirect(remoteAddr string, conn core.CommUDPConn, ep core.CommEndpoint) {
-	//tuntype 直连
-	var limit *comm.UdpLimit
-	_limit, ok := fakeDns.udpLimit.Load(remoteAddr)
-	if !ok {
-		limit = &comm.UdpLimit{Limit: rate.NewLimiter(rate.Every(1*time.Second), 50), Expired: time.Now().Unix() + 5}
-	} else {
-		limit = _limit.(*comm.UdpLimit)
+/*udp UdpSocks5*/
+func (fakeDns *SocksTap) UdpSocks5(localSocks string, remoteAddr string, localConn core.CommUDPConn, ep core.CommEndpoint) {
+
+	client, _ := socks5.NewClient(localSocks, "", "", 20, 60)
+	udpConn, err := client.Dial("udp", remoteAddr)
+
+	buf := make([]byte, 2048)
+	go func() {
+		buf1 := make([]byte, 2048)
+		var readLen = 0
+		for {
+			udpConn.SetReadDeadline(time.Now().Add(time.Second * 65))
+			readLen, err = udpConn.Read(buf1)
+			if err != nil {
+				break
+			}
+			localConn.Write(buf1[:readLen])
+		}
+	}()
+
+	for {
+		udpSize, err := localConn.Read(buf)
+		if err == nil {
+			udpConn.Write(buf[:udpSize])
+		} else {
+			break
+		}
 	}
-	//限流
-	if limit.Limit.Allow() {
-		limit.Expired = time.Now().Unix() + 5
-		//本地直连交换
-		comm.TunNatSawp(&fakeUdpNat, conn, ep, remoteAddr, 65*time.Second)
-		fakeDns.udpLimit.Store(remoteAddr, limit)
+}
+
+/*直连*/
+func (fakeDns *SocksTap) UdpDirectv1(remoteAddr string, conn core.CommUDPConn, ep core.CommEndpoint) {
+	buf := make([]byte, 2048)
+	defer fakeDns.udpProxyServer.RemoveAddr(remoteAddr)
+	for {
+		udpSize, err := conn.Read(buf)
+		if err == nil {
+			fakeDns.udpProxyServer.SendRemote(remoteAddr, buf[:udpSize], conn)
+		} else {
+			break
+		}
 	}
 }
 

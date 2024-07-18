@@ -1,7 +1,6 @@
 package comm
 
 import (
-	"bytes"
 	"log"
 
 	"golang.org/x/time/rate"
@@ -12,8 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/dosgo/go-tun2socks/core"
 )
 
 type UdpLimit struct {
@@ -25,57 +22,6 @@ var poolNatBuf = &sync.Pool{
 	New: func() interface{} {
 		return make([]byte, 4096)
 	},
-}
-
-/*udp nat sawp*/
-func TunNatSawp(_udpNat *sync.Map, conn core.CommUDPConn, ep core.CommEndpoint, dstAddr string, duration time.Duration) {
-	natKey := conn.RemoteAddr().String() + "_" + dstAddr
-	var remoteConn net.Conn
-	var err error
-	_remoteConn, ok := _udpNat.Load(natKey)
-	if !ok {
-		remoteConn, err = net.DialTimeout("udp", dstAddr, time.Second*15)
-		if err != nil {
-			return
-		}
-		var buffer bytes.Buffer
-		_udpNat.Store(natKey, remoteConn)
-		go func(_remoteConn net.Conn, _conn core.CommUDPConn) {
-			defer ep.Close()
-			defer _udpNat.Delete(natKey)
-			defer _remoteConn.Close()
-			defer _conn.Close()
-			//buf:= make([]byte, 1024*5);
-			var readLen = 0
-			for {
-				_remoteConn.SetReadDeadline(time.Now().Add(duration))
-				buf := poolNatBuf.Get().([]byte)
-				readLen, err = _remoteConn.Read(buf)
-				if err != nil {
-					log.Printf("TunNatSawp err:%v\r\n", err)
-					return
-				}
-				buffer.Reset()
-				buffer.Write(buf[:readLen])
-				_, err = _conn.Write(buffer.Bytes())
-				if err != nil {
-					log.Printf("TunNatSawp err1:%v\r\n", err)
-				}
-				poolNatBuf.Put(buf)
-			}
-		}(remoteConn, conn)
-	} else {
-		remoteConn = _remoteConn.(net.Conn)
-	}
-	buf := poolNatBuf.Get().([]byte)
-	udpSize, err := conn.Read(buf)
-	if err == nil {
-		_, err = remoteConn.Write(buf[:udpSize])
-		if err != nil {
-			log.Printf("TunNatSawp err2:%v\r\n", err)
-		}
-	}
-	poolNatBuf.Put(buf)
 }
 
 type CommConn interface {
