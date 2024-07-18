@@ -65,9 +65,9 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 	fakeDns.tunDns.StartSmartDns()
 
 	fakeDns.udpProxyServer = NewUdpProxy(":9999")
-
-	go fakeDns.udpProxyServer.Start()
-
+	if !fakeDns.udpProxy {
+		go fakeDns.udpProxyServer.Start()
+	}
 	//edit DNS
 	if runtime.GOOS != "windows" {
 		comm.SetNetConf(fakeDns.tunDns.dnsAddr)
@@ -171,16 +171,16 @@ func (fakeDns *SocksTap) tcpForwarder(conn core.CommTCPConn) error {
 func (fakeDns *SocksTap) udpForwarder(conn core.CommUDPConn, ep core.CommEndpoint) error {
 	var srcAddr = conn.LocalAddr().String()
 	var remoteAddr = ""
+	defer conn.Close()
 	remoteAddr = fakeDns.dnsToAddr(srcAddr)
 	if remoteAddr == "" {
-		conn.Close()
 		return nil
 	}
-	defer conn.Close()
 	if fakeDns.udpProxy {
 		fakeDns.UdpSocks5(fakeDns.localSocks, remoteAddr, conn)
+	} else {
+		fakeDns.UdpDirectv1(remoteAddr, conn)
 	}
-	fakeDns.UdpDirectv1(remoteAddr, conn)
 	return nil
 }
 
