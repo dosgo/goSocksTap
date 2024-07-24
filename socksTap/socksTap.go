@@ -171,57 +171,28 @@ func (fakeDns *SocksTap) udpForwarder(conn core.CommUDPConn, ep core.CommEndpoin
 	if remoteAddr == "" {
 		return nil
 	}
+	var udpConn net.Conn
+	var err error
 	if fakeDns.udpProxy {
-		fakeDns.UdpSocks5(fakeDns.localSocks, remoteAddr, conn)
+		client, err := socks5.NewClient(fakeDns.localSocks, "", "", 20, 60)
+		if err != nil {
+			return err
+		}
+		udpConn, err = client.Dial("udp", remoteAddr)
+		if err != nil {
+			return err
+		}
 	} else {
-		fakeDns.UdpDirectv1(remoteAddr, conn)
+		//直连
+		udpConn, err = net.DialTimeout("udp", remoteAddr, 5*time.Second)
+		if err != nil {
+			log.Printf("UdpDirect remoteAddr:%s err:%v\r\n", remoteAddr, err)
+			return err
+		}
 	}
+	defer udpConn.Close()
+	comm.ConnPipe(udpConn, conn, time.Minute*2)
 	return nil
-}
-
-/*udp UdpSocks5*/
-func (fakeDns *SocksTap) UdpSocks5(localSocks string, remoteAddr string, localConn core.CommUDPConn) {
-
-	client, _ := socks5.NewClient(localSocks, "", "", 20, 60)
-	udpConn, err := client.Dial("udp", remoteAddr)
-	if err == nil {
-		defer udpConn.Close()
-	}
-
-	buf := make([]byte, 2048)
-	go func() {
-		buf1 := make([]byte, 2048)
-		var readLen = 0
-		for {
-			udpConn.SetReadDeadline(time.Now().Add(time.Second * 65))
-			readLen, err = udpConn.Read(buf1)
-			if err != nil {
-				break
-			}
-			localConn.Write(buf1[:readLen])
-		}
-	}()
-
-	for {
-		localConn.SetReadDeadline(time.Now().Add(time.Second * 65))
-		udpSize, err := localConn.Read(buf)
-		if err == nil {
-			udpConn.Write(buf[:udpSize])
-		} else {
-			break
-		}
-	}
-}
-
-/*直连*/
-func (fakeDns *SocksTap) UdpDirectv1(remoteAddr string, conn core.CommUDPConn) {
-	sConn, err := net.DialTimeout("udp", remoteAddr, 5*time.Second)
-	if err != nil {
-		log.Printf("UdpDirectv1 remoteAddr:%s err:%v\r\n", remoteAddr, err)
-		return
-	}
-	defer sConn.Close()
-	comm.ConnPipe(sConn, conn, time.Minute*2)
 }
 
 /*dns addr swap*/
