@@ -45,7 +45,7 @@ func (conn TimeoutConn) Write(buf []byte) (int, error) {
 }
 
 /*tcp swap*/
-func TcpPipe(src CommConn, dst CommConn, duration time.Duration) {
+func ConnPipe(src CommConn, dst CommConn, duration time.Duration) {
 	defer src.Close()
 	defer dst.Close()
 	srcT := TimeoutConn{src, duration}
