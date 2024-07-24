@@ -31,7 +31,6 @@ type SocksTap struct {
 	safeDns        *dot.DoT
 	udpProxy       bool
 	tunDev         io.ReadWriteCloser
-	udpProxyServer *UdpProxy
 }
 
 var tunAddr = "10.0.0.2"
@@ -64,10 +63,6 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 
 	fakeDns.tunDns.StartSmartDns()
 
-	fakeDns.udpProxyServer = NewUdpProxy(":9999")
-	if !fakeDns.udpProxy {
-		go fakeDns.udpProxyServer.Start()
-	}
 	//edit DNS
 	if runtime.GOOS != "windows" {
 		comm.SetNetConf(fakeDns.tunDns.dnsAddr)
@@ -220,17 +215,13 @@ func (fakeDns *SocksTap) UdpSocks5(localSocks string, remoteAddr string, localCo
 
 /*直连*/
 func (fakeDns *SocksTap) UdpDirectv1(remoteAddr string, conn core.CommUDPConn) {
-	buf := make([]byte, 2048)
-	defer fakeDns.udpProxyServer.RemoveAddr(remoteAddr)
-	for {
-		conn.SetReadDeadline(time.Now().Add(time.Second * 65))
-		udpSize, err := conn.Read(buf)
-		if err == nil {
-			fakeDns.udpProxyServer.SendRemote(remoteAddr, buf[:udpSize], conn)
-		} else {
-			break
-		}
+	sConn, err := net.DialTimeout("udp", remoteAddr, 5*time.Second)
+	if err != nil {
+		log.Printf("UdpDirectv1 remoteAddr:%s err:%v\r\n", remoteAddr, err)
+		return
 	}
+	defer sConn.Close()
+	comm.ConnPipe(sConn, conn, time.Minute*2)
 }
 
 /*dns addr swap*/
