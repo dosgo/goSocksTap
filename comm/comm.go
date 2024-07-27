@@ -2,6 +2,7 @@ package comm
 
 import (
 	"log"
+	"sync"
 
 	"golang.org/x/time/rate"
 
@@ -9,7 +10,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -18,14 +18,9 @@ type UdpLimit struct {
 	Expired int64
 }
 
-var poolNatBuf = &sync.Pool{
-	New: func() interface{} {
-		return make([]byte, 4096)
-	},
-}
-
 type CommConn interface {
-	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
 	io.ReadWriteCloser
 }
 
@@ -35,12 +30,12 @@ type TimeoutConn struct {
 }
 
 func (conn TimeoutConn) Read(buf []byte) (int, error) {
-	conn.Conn.SetDeadline(time.Now().Add(conn.TimeOut))
+	conn.Conn.SetReadDeadline(time.Now().Add(conn.TimeOut))
 	return conn.Conn.Read(buf)
 }
 
 func (conn TimeoutConn) Write(buf []byte) (int, error) {
-	conn.Conn.SetDeadline(time.Now().Add(conn.TimeOut))
+	conn.Conn.SetWriteDeadline(time.Now().Add(conn.TimeOut))
 	return conn.Conn.Write(buf)
 }
 
@@ -50,8 +45,26 @@ func ConnPipe(src CommConn, dst CommConn, duration time.Duration) {
 	defer dst.Close()
 	srcT := TimeoutConn{src, duration}
 	dstT := TimeoutConn{dst, duration}
-	go io.Copy(srcT, dstT)
-	io.Copy(dstT, srcT)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, err := io.Copy(srcT, dstT)
+		if err != nil {
+			return
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		_, err := io.Copy(dstT, srcT)
+		if err != nil {
+			return
+		}
+	}()
+
+	// 等待所有 goroutines 完成
+	wg.Wait()
 }
 
 /*

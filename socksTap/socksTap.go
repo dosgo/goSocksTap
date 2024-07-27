@@ -157,7 +157,7 @@ func (fakeDns *SocksTap) tcpForwarder(conn core.CommTCPConn) error {
 		}
 		defer socksConn.Close()
 		if socks.SocksCmd(socksConn, 1, uint8(addrType), remoteAddr, true) == nil {
-			comm.ConnPipe(conn, socksConn, time.Second*70)
+			comm.ConnPipe(conn, socksConn, time.Second*120)
 		}
 	}
 	return nil
