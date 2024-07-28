@@ -118,6 +118,7 @@ func (fakeDns *SocksTap) task() {
 func (fakeDns *SocksTap) tcpForwarder(conn core.CommTCPConn) error {
 	defer conn.Close()
 	var srcAddr = conn.LocalAddr().String()
+
 	//不走代理
 	if netstat.IsSocksServerAddr(fakeDns.socksServerPid, conn.RemoteAddr().String()) {
 
