@@ -51,7 +51,7 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 	fakeDns.tunDns.ip2Domain = bimap.NewBiMap[string, string]()
 	if runtime.GOOS == "windows" {
 		fakeDns.socksServerPid, _ = netstat.PortGetPid(localSocks)
-		fakeDns.tunDns.dnsPort = "653" //为了避免死循环windows使用653端口
+		//fakeDns.tunDns.dnsPort = "653" //为了避免死循环windows使用653端口
 	}
 	fakeDns._startTun(1500)
 	if excludeDomain != "" {
@@ -68,9 +68,8 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 		comm.SetNetConf(fakeDns.tunDns.dnsAddr)
 	}
 	if runtime.GOOS == "windows" {
-		go winDivert.RedirectDNSV2(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort, fakeDns.tunDns.sendMinPort, fakeDns.tunDns.sendMaxPort)
-		//go winDivert.NetEventv1(strconv.Itoa(fakeDns.tunDns.socksServerPid), true)
-		//go winDivert.RedirectDNSV1(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort)
+		go winDivert.RedirectDNS(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort, fakeDns.tunDns.sendMinPort, fakeDns.tunDns.sendMaxPort)
+
 	}
 	//udp limit auto remove
 	fakeDns.run = true
@@ -222,12 +221,4 @@ func (fakeDns *SocksTap) dnsToDomain(remoteAddr string) string {
 		return ""
 	}
 	return _domain + ":" + remoteAddrs[1]
-}
-
-/*ipv6 teredo addr (4to6)*/
-func isTeredo(addr net.IP) bool {
-	if len(addr) != 16 {
-		return false
-	}
-	return addr[0] == 0x20 && addr[1] == 0x01 && addr[2] == 0x00 && addr[3] == 0x00
 }

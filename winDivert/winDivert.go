@@ -21,14 +21,12 @@ import (
 	"golang.org/x/net/ipv6"
 )
 
-var winDivert *divert.Handle
+var outboundDivert *divert.Handle
 var winDivertRun = false
 
-var winDivertEvent *divert.Handle
-var winDivertEventRun = false
+var inboundDivert *divert.Handle
 
 // 不处理的地址包括udp+tcp
-var excludeOriginalAddr sync.Map
 var divertDll = "WinDivert.dll"
 var divertSys = "WinDivert32.sys"
 
@@ -69,97 +67,6 @@ func dllInit(_divertDll string) {
 }
 
 /*windows转发*/
-func RedirectDNS(dnsAddr string, _port string, sendStartPort int, sendEndPort int) {
-	var err error
-	_, err = os.Stat(divertDll)
-	if err != nil {
-		log.Printf("not found :%s\r\n", divertDll)
-		return
-	}
-	winDivertRun = true
-	var filter = "outbound and !loopback and !impostor and udp.DstPort=53  and (udp.SrcPort>" + strconv.Itoa(sendEndPort) + " or udp.SrcPort<" + strconv.Itoa(sendStartPort) + ")"
-
-	winDivert, err = divert.Open(filter, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
-	if err != nil {
-		log.Printf("winDivert open failed: %v\r\n", err)
-		return
-	}
-	var recvBuf []byte = make([]byte, 1500)
-	addr := divert.Address{}
-	var recvLen uint
-	for winDivertRun {
-		if winDivert == nil {
-			continue
-		}
-		recvLen, err = winDivert.Recv(recvBuf, &addr)
-		if err != nil {
-			log.Println(1, err)
-			continue
-		}
-		sendDns(dnsAddr, _port, recvBuf, recvLen, &addr, "111")
-	}
-}
-
-/*windows转发*/
-func RedirectDNSV1(dnsAddr string, _port string) {
-	var err error
-	_, err = os.Stat(divertDll)
-	if err != nil {
-		log.Printf("not found :%s\r\n", divertDll)
-		return
-	}
-	winDivertRun = true
-	var filter = "outbound and !loopback and !impostor and udp.DstPort=53"
-
-	winDivert, err = divert.Open(filter, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
-	if err != nil {
-		log.Printf("winDivert open failed: %v\r\n", err)
-		return
-	}
-
-	var recvBuf []byte = make([]byte, 1500)
-	addr := divert.Address{}
-
-	var recvLen uint
-
-	for winDivertRun {
-		if winDivert == nil {
-			continue
-		}
-		recvLen, err = winDivert.Recv(recvBuf, &addr)
-		if err != nil {
-			log.Println(1, err)
-			continue
-		}
-		var ipheadlen int
-		ipv6 := recvBuf[0]>>4 == 6
-		if ipv6 {
-			ipheadlen = 40
-		} else {
-			ipheadlen = int(recvBuf[0]&0xF) * 4
-		}
-
-		//如果是本机的请求直接发送
-		srcPort := binary.BigEndian.Uint16(recvBuf[ipheadlen : ipheadlen+2])
-		_, ok := excludeOriginalAddr.Load("udp:" + strconv.Itoa(int(srcPort)))
-		if ok {
-			winDivert.Send(recvBuf[:recvLen], &addr)
-			continue
-		}
-
-		hash := fmt.Sprintf("%x", recvBuf[22:recvLen])
-		_, ok = removeRepeat.Load(hash)
-		if !ok {
-			removeRepeat.Store(hash, 1)
-			go sendDns(dnsAddr, _port, recvBuf, recvLen, &addr, hash)
-		} else {
-			fmt.Printf("dddd\r\n")
-		}
-		time.Sleep(time.Millisecond * 10)
-	}
-
-}
-
 /*windows转发*/
 func RedirectDNSV2(dnsAddr string, _port string, sendStartPort int, sendEndPort int) {
 	var err error
@@ -170,7 +77,7 @@ func RedirectDNSV2(dnsAddr string, _port string, sendStartPort int, sendEndPort 
 	}
 	winDivertRun = true
 	var filter = "outbound and !loopback and !impostor and udp.DstPort=53  and (udp.SrcPort>" + strconv.Itoa(sendEndPort) + " or udp.SrcPort<" + strconv.Itoa(sendStartPort) + ")"
-	winDivert, err = divert.Open(filter, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
+	outboundDivert, err = divert.Open(filter, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
 	if err != nil {
 		log.Printf("winDivert open failed: %v\r\n", err)
 		return
@@ -180,10 +87,10 @@ func RedirectDNSV2(dnsAddr string, _port string, sendStartPort int, sendEndPort 
 	var recvLen uint
 	var ipHeadLen int
 	for winDivertRun {
-		if winDivert == nil {
+		if outboundDivert == nil {
 			continue
 		}
-		recvLen, err = winDivert.Recv(recvBuf, &addr)
+		recvLen, err = outboundDivert.Recv(recvBuf, &addr)
 		if err != nil {
 			log.Println(1, err)
 			continue
@@ -196,15 +103,6 @@ func RedirectDNSV2(dnsAddr string, _port string, sendStartPort int, sendEndPort 
 			ipHeadLen = int(recvBuf[0]&0xF) * 4
 		}
 		hash := fmt.Sprintf("%x", recvBuf[ipHeadLen+2:recvLen])
-		/*
-			_, ok := removeRepeat.Load(hash)
-			if !ok {
-				removeRepeat.Store(hash, int64(time.Now().Unix()))
-				go sendDns(dnsAddr, _port, recvBuf, recvLen, &addr, hash)
-			} else {
-				fmt.Printf("udp pack fiter\r\n")
-			}
-		*/
 		go sendDns(dnsAddr, _port, recvBuf, recvLen, &addr, hash)
 		time.Sleep(time.Millisecond * 10)
 	}
@@ -308,7 +206,7 @@ func sendDns(dnsAddr string, port string, recvBuf []byte, recvLen uint, addr *di
 		copy(rawbuf[ipHeadLen+udpHeadLen:], dnsRecvBuf[:conRecvLen])
 
 		divert.CalcChecksums(rawbuf[:ipHeadLen+int(udpHeader.Length)], addr, 0)
-		_, err = winDivert.Send(rawbuf[:ipHeadLen+int(udpHeader.Length)], addr)
+		_, err = outboundDivert.Send(rawbuf[:ipHeadLen+int(udpHeader.Length)], addr)
 		if err != nil {
 			log.Println(1, err)
 			return
@@ -316,117 +214,145 @@ func sendDns(dnsAddr string, port string, recvBuf []byte, recvLen uint, addr *di
 	}
 }
 
-/*网络事件监听*/
-func NetEvent(pid string, ownPid bool) {
-
-	var err error
-	_, err = os.Stat(divertDll)
-	if err != nil {
-		log.Printf("not found :%s\r\n", divertDll)
-		return
-	}
-	winDivertEventRun = true
-	var filter = "outbound"
-	if ownPid {
-		filter = filter + " and (processId=" + pid + " or  processId=" + strconv.Itoa(os.Getpid()) + ")"
-	} else {
-		filter = filter + " and processId=" + pid
-	}
-	winDivertEvent, err = divert.Open(filter, divert.LayerSocket, divert.PriorityDefault, divert.FlagSniff|divert.FlagRecvOnly)
-	if err != nil {
-		log.Printf("winDivert open failed: %v\r\n", err)
-		return
-	}
-
-	var recvBuf []byte = make([]byte, 1)
-	addr := divert.Address{}
-	for winDivertEventRun {
-		if winDivertEvent == nil {
-			continue
-		}
-		_, err = winDivertEvent.Recv(recvBuf, &addr)
-
-		switch addr.Event() {
-		case divert.EventSocketBind:
-			if addr.Socket().Protocol == 17 {
-				//udp只有53的才记录
-				log.Printf("udp pid:%d  local Port:%d rport:%d\r\n", addr.Socket().ProcessID, addr.Socket().LocalPort, addr.Socket().RemotePort)
-				excludeOriginalAddr.Store("udp:"+strconv.Itoa(int(addr.Socket().LocalPort)), int64(time.Now().Unix()))
-
-			} else {
-				excludeOriginalAddr.Store("tcp:"+strconv.Itoa(int(addr.Socket().LocalPort)), int64(time.Now().Unix()))
-			}
-			break
-		case divert.EventSocketClose:
-			if addr.Socket().Protocol == 17 {
-				//log.Printf("udp close pid:%d  local Port:%d rport:%d\r\n", addr.Socket().ProcessID, addr.Socket().LocalPort, addr.Socket().RemotePort)
-			}
-			break
-		}
-	}
-
+type ForwardInfo struct {
+	Value    net.IP
+	LastTime int64
 }
 
-/*网络事件监听*/
-func NetEventv1(pid string, ownPid bool) {
+func RedirectDNS(dnsAddr string, _port string, sendStartPort int, sendEndPort int) {
+	fmt.Printf("dnsAddr:%s_port:%d\r\n", dnsAddr, _port)
 	var err error
 	_, err = os.Stat(divertDll)
 	if err != nil {
 		log.Printf("not found :%s\r\n", divertDll)
 		return
 	}
-	winDivertEventRun = true
-	var filter = "outbound"
-	if ownPid {
-		filter = filter + " and (processId=" + pid + " or  processId=" + strconv.Itoa(os.Getpid()) + ")"
-	} else {
-		filter = filter + " and processId=" + pid
-	}
-	winDivertEvent, err = divert.Open(filter, divert.LayerFlow, divert.PriorityDefault, divert.FlagSniff|divert.FlagRecvOnly)
+	winDivertRun = true
+	var forward sync.Map
+	// 启动清理过期项的 goroutine
+	go func() {
+
+		for winDivertRun {
+			forward.Range(func(key, value interface{}) bool {
+				expireableVal, ok := value.(ForwardInfo)
+				if ok && expireableVal.LastTime+120 < time.Now().Unix() {
+					// 直接删除过期的键
+					forward.Delete(key)
+				}
+				return true
+			})
+			time.Sleep(time.Second * 120)
+		}
+	}()
+
+	// 出站重定向
+	filterOut := "outbound  and !impostor and udp.DstPort=53 and ip.DstAddr!=" + dnsAddr + " and (udp.SrcPort>" + strconv.Itoa(sendEndPort) + " or udp.SrcPort<" + strconv.Itoa(sendStartPort) + ")"
+	outboundDivert, err = divert.Open(filterOut, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
 	if err != nil {
 		log.Printf("winDivert open failed: %v\r\n", err)
 		return
 	}
+	defer outboundDivert.Close()
 
-	var recvBuf []byte = make([]byte, 1)
-	addr := divert.Address{}
-	for winDivertEventRun {
-		if winDivertEvent == nil {
-			continue
-		}
-		_, err = winDivertEvent.Recv(recvBuf, &addr)
-
-		switch addr.Event() {
-		case divert.EventFlowEstablished:
-			if addr.Socket().Protocol == 17 {
-				//udp只有53的才记录
-				if addr.Socket().RemotePort == 53 {
-					log.Printf("udp pid:%d  local Port:%d rport:%d\r\n", addr.Socket().ProcessID, addr.Socket().LocalPort, addr.Socket().RemotePort)
-
-					excludeOriginalAddr.Store("udp:"+strconv.Itoa(int(addr.Socket().LocalPort)), int64(time.Now().Unix()))
-				}
-			} else {
-				excludeOriginalAddr.Store("tcp:"+strconv.Itoa(int(addr.Socket().LocalPort)), int64(time.Now().Unix()))
-			}
-			break
-		case divert.EventFlowDeleted:
-			if addr.Socket().Protocol == 17 {
-				//log.Printf("udp close pid:%d  local Port:%d rport:%d\r\n", addr.Socket().ProcessID, addr.Socket().LocalPort, addr.Socket().RemotePort)
-			}
-			break
-		}
+	// 入站重定向
+	filterIn := fmt.Sprintf("    udp.SrcPort=53 and ip.SrcAddr=%s", dnsAddr)
+	inboundDivert, err := divert.Open(filterIn, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
+	if err != nil {
+		log.Printf("winDivert open failed: %v\r\n", err)
+		return
 	}
+	defer inboundDivert.Close()
 
+	recvBuf := make([]byte, 2024)
+	addr := divert.Address{}
+
+	// 出站重定向循环
+	go func() {
+		for winDivertRun {
+			recvLen, err := outboundDivert.Recv(recvBuf, &addr)
+			if err != nil {
+				log.Printf("winDivert recv failed: %v\r\n", err)
+				return
+			}
+			isIpv6 := recvBuf[0]>>4 == 6
+			ipHeadLen := 40 // Assuming IPv6 if not modified later
+			if !isIpv6 {
+				ipHeadLen = int(recvBuf[0]&0xF) * 4
+			}
+
+			udpHeader := &UDPHeader{}
+			udpHeader.Parse(recvBuf[ipHeadLen:])
+
+			if isIpv6 {
+				ipHeader, _ := ipv6.ParseHeader(recvBuf[:recvLen])
+				forward.Store(udpHeader.SrcPort, ForwardInfo{Value: ipHeader.Dst, LastTime: time.Now().Unix()})
+
+			} else {
+				ipHeader, _ := ipv4.ParseHeader(recvBuf[:recvLen])
+
+				//	fmt.Printf("outbound src:%s dst:%s SrcPort:%d dnsAddr:%s\r\n", ipHeader.Src, ipHeader.Dst, udpHeader.SrcPort, dnsAddr)
+				forward.Store(udpHeader.SrcPort, ForwardInfo{Value: ipHeader.Dst, LastTime: time.Now().Unix()})
+				ipHeader.Dst = net.ParseIP(dnsAddr)
+				tempBuf, _ := ipHeader.Marshal()
+				copy(recvBuf, tempBuf)
+
+			}
+			/*
+				_portNum, _ := strconv.ParseInt(_port, 10, 16)
+				udpHeader.DstPort = uint16(_portNum)
+				tempBuf1, _ := udpHeader.Marshal()
+				copy(recvBuf[ipHeadLen:], tempBuf1)
+			*/
+			divert.CalcChecksums(recvBuf[:recvLen], &addr, 0)
+			outboundDivert.Send(recvBuf[:recvLen], &addr)
+		}
+	}()
+
+	// 入站重定向循环
+	inboundBuf := make([]byte, 2024)
+	for winDivertRun {
+		recvLen, err := inboundDivert.Recv(inboundBuf, &addr)
+		if err != nil {
+			log.Printf("winDivert recv failed: %v\r\n", err)
+			return
+		}
+
+		isIpv6 := inboundBuf[0]>>4 == 6
+		ipHeadLen := 40 // Assuming IPv6 if not modified later
+		if !isIpv6 {
+			ipHeadLen = int(inboundBuf[0]&0xF) * 4
+		}
+		fmt.Printf("inbound1\r\n")
+		udpHeader := &UDPHeader{}
+		udpHeader.Parse(inboundBuf[ipHeadLen:])
+		forwardInfo, ok := forward.Load(udpHeader.DstPort)
+
+		if isIpv6 {
+			ipHeader, _ := ipv6.ParseHeader(inboundBuf[:recvLen])
+			if ok {
+				ipHeader.Src = forwardInfo.(ForwardInfo).Value
+			}
+		} else {
+			ipHeader, _ := ipv4.ParseHeader(inboundBuf[:recvLen])
+			if ok {
+				fmt.Printf("inbound\r\n")
+				ipHeader.Src = forwardInfo.(ForwardInfo).Value
+			}
+			tempBuf, _ := ipHeader.Marshal()
+			copy(inboundBuf, tempBuf)
+		}
+
+		divert.CalcChecksums(inboundBuf[:recvLen], &addr, 0)
+		inboundDivert.Send(inboundBuf[:recvLen], &addr)
+	}
 }
 
 func CloseWinDivert() {
 	winDivertRun = false
-	if winDivert != nil {
-		winDivert.Close()
+	if outboundDivert != nil {
+		outboundDivert.Close()
 	}
-
-	winDivertEventRun = false
-	if winDivertEvent != nil {
-		winDivertEvent.Close()
+	if inboundDivert != nil {
+		inboundDivert.Close()
 	}
 }

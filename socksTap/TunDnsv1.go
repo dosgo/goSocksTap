@@ -88,7 +88,7 @@ func (tunDns *TunDnsV1) StartSmartDns() {
 	tunDns.run = true
 	tunDns.udpServer = &dns.Server{
 		Net:          "udp4",
-		Addr:         tunDns.dnsAddr + ":" + tunDns.dnsPort,
+		Addr:         ":" + tunDns.dnsPort,
 		Handler:      dns.HandlerFunc(tunDns.ServeDNS),
 		UDPSize:      4096,
 		ReadTimeout:  time.Duration(10) * time.Second,
@@ -107,6 +107,7 @@ func (tunDns *TunDnsV1) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	ipLog, ok := tunDns.ip2Domain.GetInverse(domain)
 	var response *dns.Msg
 	var err error
+	log.Println("cache  allocIp dns:" + domain)
 	_, excludeFlag := tunDns.excludeDomains.Load(domain)
 	if ok && !excludeFlag && qtype == dns.TypeA {
 		log.Println("cache  allocIp dns:" + domain)
