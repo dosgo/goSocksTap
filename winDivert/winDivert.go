@@ -107,7 +107,166 @@ func RedirectDNSV2(dnsAddr string, _port string, sendStartPort int, sendEndPort 
 		time.Sleep(time.Millisecond * 10)
 	}
 }
+func RedirectDNSTest(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPort int, localHost bool) {
+	fmt.Printf("dnsAddr:%s_port:%d\r\n", dnsAddr, dnsPort)
+	var err error
+	_, err = os.Stat(divertDll)
+	if err != nil {
+		log.Printf("not found :%s\r\n", divertDll)
+		return
+	}
+	winDivertRun = true
+	var forward sync.Map
+	// 启动清理过期项的 goroutine
+	go func() {
 
+		for winDivertRun {
+			forward.Range(func(key, value interface{}) bool {
+				expireableVal, ok := value.(ForwardInfo)
+				if ok && expireableVal.LastTime+120 < time.Now().Unix() {
+					// 直接删除过期的键
+					forward.Delete(key)
+				}
+				return true
+			})
+			time.Sleep(time.Second * 120)
+		}
+	}()
+
+	var filterIn = ""
+	if dnsPort != 53 {
+		filterIn = fmt.Sprintf("!impostor and udp.SrcPort=%d and ip.SrcAddr=%s", dnsPort, dnsAddr)
+	} else {
+		filterIn = fmt.Sprintf("!impostor and udp.SrcPort=53 and ip.SrcAddr=%s", dnsAddr)
+	}
+	inboundDivert, err := divert.Open(filterIn, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
+	if err != nil {
+		log.Printf("winDivert open failed: %v\r\n", err)
+		return
+	}
+	defer inboundDivert.Close()
+
+	recvBuf := make([]byte, 2024)
+	addr := divert.Address{}
+
+	// 出站重定向循环
+	go func() {
+
+		// 出站重定向
+		filterOut := "outbound  and !impostor and udp.DstPort=53 and ip.DstAddr!=" + dnsAddr + " and (udp.SrcPort>" + strconv.Itoa(sendEndPort) + " or udp.SrcPort<" + strconv.Itoa(sendStartPort) + ")"
+		outboundDivert, err = divert.Open(filterOut, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
+		if err != nil {
+			log.Printf("winDivert open failed: %v\r\n", err)
+			return
+		}
+		defer outboundDivert.Close()
+
+		for winDivertRun {
+			recvLen, err := outboundDivert.Recv(recvBuf, &addr)
+			if err != nil {
+				log.Printf("winDivert recv failed: %v\r\n", err)
+				return
+			}
+			isIpv6 := recvBuf[0]>>4 == 6
+			ipHeadLen := 40 // Assuming IPv6 if not modified later
+			if !isIpv6 {
+				ipHeadLen = int(recvBuf[0]&0xF) * 4
+			}
+
+			udpHeader := &UDPHeader{}
+			udpHeader.Parse(recvBuf[ipHeadLen:])
+
+			if isIpv6 {
+				ipHeader, _ := ipv6.ParseHeader(recvBuf[:recvLen])
+				forward.Store(udpHeader.SrcPort, ForwardInfo{Dst: ipHeader.Dst, Src: ipHeader.Src, LastTime: time.Now().Unix(), InterfaceIndex: addr.Network().InterfaceIndex, SubInterfaceIndex: addr.Network().SubInterfaceIndex})
+
+			} else {
+				ipHeader, _ := ipv4.ParseHeader(recvBuf[:recvLen])
+
+				//	fmt.Printf("outbound src:%s dst:%s SrcPort:%d dnsAddr:%s\r\n", ipHeader.Src, ipHeader.Dst, udpHeader.SrcPort, dnsAddr)
+				forward.Store(udpHeader.SrcPort, ForwardInfo{Dst: ipHeader.Dst, Src: ipHeader.Src, LastTime: time.Now().Unix(), InterfaceIndex: addr.Network().InterfaceIndex, SubInterfaceIndex: addr.Network().SubInterfaceIndex})
+				ipHeader.Dst = net.ParseIP(dnsAddr)
+				if localHost {
+					ipHeader.Src = net.ParseIP(dnsAddr)
+				}
+				tempBuf, _ := ipHeader.Marshal()
+				copy(recvBuf, tempBuf)
+
+			}
+			/*
+				_portNum, _ := strconv.ParseInt(_port, 10, 16)
+				udpHeader.DstPort = uint16(_portNum)
+				tempBuf1, _ := udpHeader.Marshal()
+				copy(recvBuf[ipHeadLen:], tempBuf1)
+			*/
+			if dnsPort != 53 {
+				udpHeader.DstPort = dnsPort
+				tempBuf1, _ := udpHeader.Marshal()
+				copy(recvBuf[ipHeadLen:], tempBuf1)
+			}
+			if localHost {
+				addr.Network().InterfaceIndex = 1
+				addr.Network().SubInterfaceIndex = 0
+				addr.Flags |= uint8(0x01 << 2) //lookback=1
+			}
+
+			divert.CalcChecksums(recvBuf[:recvLen], &addr, 0)
+			outboundDivert.Send(recvBuf[:recvLen], &addr)
+		}
+	}()
+
+	// 入站重定向循环
+	inboundBuf := make([]byte, 2024)
+	inboundAddr := divert.Address{}
+	for winDivertRun {
+		recvLen, err := inboundDivert.Recv(inboundBuf, &inboundAddr)
+		if err != nil {
+			log.Printf("winDivert recv failed: %v\r\n", err)
+			return
+		}
+
+		isIpv6 := inboundBuf[0]>>4 == 6
+		ipHeadLen := 40 // Assuming IPv6 if not modified later
+		if !isIpv6 {
+			ipHeadLen = int(inboundBuf[0]&0xF) * 4
+		}
+		fmt.Printf("inbound1\r\n")
+		udpHeader := &UDPHeader{}
+		udpHeader.Parse(inboundBuf[ipHeadLen:])
+		tempForward, ok := forward.Load(udpHeader.DstPort)
+		forwardInfo := tempForward.(ForwardInfo)
+		if isIpv6 {
+			ipHeader, _ := ipv6.ParseHeader(inboundBuf[:recvLen])
+			if ok {
+				ipHeader.Src = forwardInfo.Dst
+			}
+		} else {
+			ipHeader, _ := ipv4.ParseHeader(inboundBuf[:recvLen])
+			if ok {
+				fmt.Printf("inbound\r\n")
+				ipHeader.Src = forwardInfo.Dst
+				if localHost {
+					ipHeader.Dst = forwardInfo.Src
+				}
+			}
+			tempBuf, _ := ipHeader.Marshal()
+			copy(inboundBuf, tempBuf)
+		}
+		if dnsPort != 53 {
+			udpHeader.SrcPort = 53
+			tempBuf1, _ := udpHeader.Marshal()
+			copy(inboundBuf[ipHeadLen:], tempBuf1)
+		}
+
+		if localHost {
+			inboundAddr.Network().InterfaceIndex = forwardInfo.InterfaceIndex       //conn->if_idx;
+			inboundAddr.Network().SubInterfaceIndex = forwardInfo.SubInterfaceIndex //conn->sub_if_idx;                           //Outbound=0
+			inboundAddr.Flags &= ^uint8(0x01 << 2)                                  //Loopback=0
+		}
+		divert.CalcChecksums(inboundBuf[:recvLen], &inboundAddr, 0)
+		inboundDivert.Send(inboundBuf[:recvLen], &inboundAddr)
+	}
+}
 func sendDns(dnsAddr string, port string, recvBuf []byte, recvLen uint, addr *divert.Address, hash string) {
 	defer removeRepeat.Delete(hash)
 	dnsConn, err := net.DialTimeout("udp", dnsAddr+":"+port, 15*time.Second)
