@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,13 +24,13 @@ type TunDnsV1 struct {
 	//excludeDomains      map[string]uint8
 	excludeDomains sync.Map
 	dnsAddr        string
-	dnsPort        string
+	dnsPort        uint16
 	ip2Domain      *bimap.BiMap[string, string]
 	sendMinPort    int
 	sendMaxPort    int
 }
 
-func NewTunDns(addr string, port string) *TunDnsV1 {
+func NewTunDns(addr string, port uint16) *TunDnsV1 {
 	tunDns := &TunDnsV1{dnsPort: port, dnsAddr: addr}
 	tunDns.dnsCache = &comm.DnsCacheV1{Cache: make(map[string]comm.CachedResponse, 128)}
 	return tunDns
@@ -88,7 +89,7 @@ func (tunDns *TunDnsV1) StartSmartDns() {
 	tunDns.run = true
 	tunDns.udpServer = &dns.Server{
 		Net:          "udp4",
-		Addr:         ":" + tunDns.dnsPort,
+		Addr:         ":" + strconv.Itoa(int(tunDns.dnsPort)),
 		Handler:      dns.HandlerFunc(tunDns.ServeDNS),
 		UDPSize:      4096,
 		ReadTimeout:  time.Duration(10) * time.Second,

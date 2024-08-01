@@ -4,7 +4,7 @@
 package winDivert
 
 /*only windows*/
-func RedirectDNS(dnsAddr string, _port string, sendStartPort int, sendEndPort int) {
+func RedirectDNS(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPort int, localHost bool) {
 
 }
 

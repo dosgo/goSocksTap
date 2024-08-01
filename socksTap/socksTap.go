@@ -44,14 +44,14 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 	fakeDns.safeDns = dot.NewDot("dns.google", "8.8.8.8:853", localSocks)
 	//start local dns
 	//fakeDns.tunDns = &TunDns{dnsPort: "53", dnsAddr: tunAddr}
-	fakeDns.tunDns = NewTunDns(tunAddr, "53")
+	fakeDns.tunDns = NewTunDns(tunAddr, 53)
 	fakeDns.tunDns.sendMinPort = 600
 	fakeDns.tunDns.sendMaxPort = 700
 
 	fakeDns.tunDns.ip2Domain = bimap.NewBiMap[string, string]()
 	if runtime.GOOS == "windows" {
 		fakeDns.socksServerPid, _ = netstat.PortGetPid(localSocks)
-		//fakeDns.tunDns.dnsPort = "653" //为了避免死循环windows使用653端口
+		fakeDns.tunDns.dnsPort = 653 //为了避免死循环windows使用653端口
 	}
 	fakeDns._startTun(1500)
 	if excludeDomain != "" {
@@ -68,7 +68,7 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 		comm.SetNetConf(fakeDns.tunDns.dnsAddr)
 	}
 	if runtime.GOOS == "windows" {
-		go winDivert.RedirectDNS(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort, fakeDns.tunDns.sendMinPort, fakeDns.tunDns.sendMaxPort)
+		go winDivert.RedirectDNS(fakeDns.tunDns.dnsAddr, fakeDns.tunDns.dnsPort, fakeDns.tunDns.sendMinPort, fakeDns.tunDns.sendMaxPort, true)
 
 	}
 	//udp limit auto remove
