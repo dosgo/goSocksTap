@@ -43,6 +43,9 @@ func (h *UDPHeader) Marshal() ([]byte, error) {
 	binary.BigEndian.PutUint16(b[4:], h.Length)
 	return b, nil
 }
+func (h *UDPHeader) Reset() {
+	*h = UDPHeader{}
+}
 
 func (h *UDPHeader) Parse(b []byte) error {
 	if len(b) < 8 {
@@ -81,7 +84,6 @@ func RedirectDNS(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPort 
 	var forward sync.Map
 	// 启动清理过期项的 goroutine
 	go func() {
-
 		for winDivertRun {
 			forward.Range(func(key, value interface{}) bool {
 				expireableVal, ok := value.(ForwardInfo)
@@ -113,6 +115,7 @@ func RedirectDNS(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPort 
 
 	// 出站重定向循环
 	go func() {
+		inboundUdpHeader := &UDPHeader{}
 		// 出站重定向
 		filterOut := "outbound  and !impostor and udp.DstPort=53 and ip.DstAddr!=" + dnsAddr + " and (udp.SrcPort>" + strconv.Itoa(sendEndPort) + " or udp.SrcPort<" + strconv.Itoa(sendStartPort) + ")"
 		outboundDivert, err = divert.Open(filterOut, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
@@ -134,18 +137,18 @@ func RedirectDNS(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPort 
 				ipHeadLen = int(recvBuf[0]&0xF) * 4
 			}
 
-			udpHeader := &UDPHeader{}
-			udpHeader.Parse(recvBuf[ipHeadLen:])
+			inboundUdpHeader.Reset()
+			inboundUdpHeader.Parse(recvBuf[ipHeadLen:])
 
 			if isIpv6 {
 				ipHeader, _ := ipv6.ParseHeader(recvBuf[:recvLen])
-				forward.Store(udpHeader.SrcPort, ForwardInfo{Dst: ipHeader.Dst, Src: ipHeader.Src, LastTime: time.Now().Unix(), InterfaceIndex: addr.Network().InterfaceIndex, SubInterfaceIndex: addr.Network().SubInterfaceIndex})
+				forward.Store(inboundUdpHeader.SrcPort, ForwardInfo{Dst: ipHeader.Dst, Src: ipHeader.Src, LastTime: time.Now().Unix(), InterfaceIndex: addr.Network().InterfaceIndex, SubInterfaceIndex: addr.Network().SubInterfaceIndex})
 
 			} else {
 				ipHeader, _ := ipv4.ParseHeader(recvBuf[:recvLen])
 
 				//	fmt.Printf("outbound src:%s dst:%s SrcPort:%d dnsAddr:%s\r\n", ipHeader.Src, ipHeader.Dst, udpHeader.SrcPort, dnsAddr)
-				forward.Store(udpHeader.SrcPort, ForwardInfo{Dst: ipHeader.Dst, Src: ipHeader.Src, LastTime: time.Now().Unix(), InterfaceIndex: addr.Network().InterfaceIndex, SubInterfaceIndex: addr.Network().SubInterfaceIndex})
+				forward.Store(inboundUdpHeader.SrcPort, ForwardInfo{Dst: ipHeader.Dst, Src: ipHeader.Src, LastTime: time.Now().Unix(), InterfaceIndex: addr.Network().InterfaceIndex, SubInterfaceIndex: addr.Network().SubInterfaceIndex})
 				ipHeader.Dst = net.ParseIP(dnsAddr)
 				if localHost {
 					ipHeader.Src = net.ParseIP(dnsAddr)
@@ -156,8 +159,8 @@ func RedirectDNS(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPort 
 			}
 
 			if dnsPort != 53 {
-				udpHeader.DstPort = dnsPort
-				tempBuf1, _ := udpHeader.Marshal()
+				inboundUdpHeader.DstPort = dnsPort
+				tempBuf1, _ := inboundUdpHeader.Marshal()
 				copy(recvBuf[ipHeadLen:], tempBuf1)
 			}
 			if localHost {
@@ -174,6 +177,7 @@ func RedirectDNS(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPort 
 	// 入站重定向循环
 	inboundBuf := make([]byte, 2024)
 	inboundAddr := divert.Address{}
+	inboundUdpHeader := &UDPHeader{}
 	for winDivertRun {
 		recvLen, err := inboundDivert.Recv(inboundBuf, &inboundAddr)
 		if err != nil {
@@ -186,9 +190,9 @@ func RedirectDNS(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPort 
 		if !isIpv6 {
 			ipHeadLen = int(inboundBuf[0]&0xF) * 4
 		}
-		udpHeader := &UDPHeader{}
-		udpHeader.Parse(inboundBuf[ipHeadLen:])
-		tempForward, ok := forward.Load(udpHeader.DstPort)
+		inboundUdpHeader.Reset()
+		inboundUdpHeader.Parse(inboundBuf[ipHeadLen:])
+		tempForward, ok := forward.Load(inboundUdpHeader.DstPort)
 		forwardInfo := tempForward.(ForwardInfo)
 		if isIpv6 {
 			ipHeader, _ := ipv6.ParseHeader(inboundBuf[:recvLen])
@@ -207,8 +211,8 @@ func RedirectDNS(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPort 
 			copy(inboundBuf, tempBuf)
 		}
 		if dnsPort != 53 {
-			udpHeader.SrcPort = 53
-			tempBuf1, _ := udpHeader.Marshal()
+			inboundUdpHeader.SrcPort = 53
+			tempBuf1, _ := inboundUdpHeader.Marshal()
 			copy(inboundBuf[ipHeadLen:], tempBuf1)
 		}
 
