@@ -4,6 +4,8 @@
 package netstat
 
 import (
+	"errors"
+	"os"
 	"strconv"
 	"strings"
 
