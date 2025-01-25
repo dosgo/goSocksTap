@@ -252,6 +252,8 @@ func RedirectDNSV1(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPor
 			time.Sleep(time.Second * 120)
 		}
 	}()
+	//监控本进程的端口用于过滤
+	go NetEvent()
 
 	var filterIn = ""
 	if dnsPort != 53 {
@@ -393,7 +395,7 @@ func RedirectDNSV1(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPor
 	}
 }
 
-func NetEvent(pid int, slefPid bool) {
+func NetEvent() {
 	var err error
 	_, err = os.Stat(divertDll)
 	if err != nil {
@@ -401,10 +403,8 @@ func NetEvent(pid int, slefPid bool) {
 		return
 	}
 	winDivertRun = true
-	var filter = fmt.Sprintf("processId=%d and udp", pid)
-	if slefPid {
-		filter = fmt.Sprintf("(processId=%d or processId=%d) and udp", pid, os.Getpid())
-	}
+	var filter = fmt.Sprintf("processId=%d and udp", os.Getpid())
+
 	eventDivert, err := divert.Open(filter, divert.LayerFlow, divert.PriorityDefault, divert.FlagSniff|divert.FlagRecvOnly)
 	if err != nil {
 		log.Printf("winDivert open failed: %v\r\n", err)
@@ -435,7 +435,7 @@ func NetEvent(pid int, slefPid bool) {
 			}
 		}
 	}()
-	ports, err := netstat.GetUdpBindList(pid, slefPid)
+	ports, err := netstat.GetUdpBindList(os.Getpid(), false)
 	if err == nil {
 		for _, binding := range ports {
 			// 在这里可以添加其他操作
