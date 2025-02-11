@@ -14,8 +14,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dosgo/goSocksTap/comm"
 	"github.com/dosgo/goSocksTap/comm/netstat"
+	"github.com/dosgo/goSocksTap/socksTap"
 	"github.com/imgk/divert-go"
+	"github.com/miekg/dns"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
@@ -253,7 +256,7 @@ func RedirectDNSV1(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPor
 		}
 	}()
 	//监控本进程的端口用于过滤
-	go NetEvent()
+	go NetEvent(1)
 
 	var filterIn = ""
 	if dnsPort != 53 {
@@ -395,7 +398,67 @@ func RedirectDNSV1(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPor
 	}
 }
 
-func NetEvent() {
+func RedirectDNSV2() {
+	var err error
+	_, err = os.Stat(divertDll)
+	if err != nil {
+		log.Printf("not found :%s\r\n", divertDll)
+		return
+	}
+	winDivertRun = true
+
+	//监控本进程的端口用于过滤
+	//go NetEvent()
+
+	var filterIn = ""
+	filterIn = fmt.Sprintf("!impostor and udp.SrcPort=53")
+
+	inboundDivert, err := divert.Open(filterIn, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
+	if err != nil {
+		log.Printf("winDivert open failed: %v\r\n", err)
+		return
+	}
+	defer inboundDivert.Close()
+
+	// 入站重定向循环
+	inboundBuf := make([]byte, 2024)
+	inboundAddr := divert.Address{}
+
+	for winDivertRun {
+		recvLen, err := inboundDivert.Recv(inboundBuf, &inboundAddr)
+		if err != nil {
+			log.Printf("winDivert recv failed: %v\r\n", err)
+			return
+		}
+		fmt.Printf("inboundBuf[:recvLen]:%s\r\n", inboundBuf[:recvLen])
+
+		divert.CalcChecksums(inboundBuf[:recvLen], &inboundAddr, 0)
+		inboundDivert.Send(inboundBuf[:recvLen], &inboundAddr)
+	}
+}
+
+func ModifyDNSResponse(packet []byte, tunDns *socksTap.TunDnsV2) ([]byte, error) {
+	msg := new(dns.Msg)
+	msg.Pack()
+	if err := msg.Unpack(packet); err != nil {
+		return packet, fmt.Errorf("解析DNS响应包失败: %v", err)
+	}
+	domain := msg.Question[0].Name
+	for _, answer := range msg.Answer {
+		if a, ok := answer.(*dns.A); ok {
+			_, excludeFlag := tunDns.ExcludeDomains.Load(domain)
+			//不是中国ip,又不是排除的ip
+			if !excludeFlag && !comm.IsChinaMainlandIP(a.A.String()) && comm.IsPublicIP(a.A) {
+				ip := tunDns.AllocIpByDomain(domain)
+				a.A = net.ParseIP(ip)
+				a.Hdr.Ttl = 5
+			}
+		}
+	}
+	return msg.Pack()
+}
+
+func NetEvent(pid uint32) {
 	var err error
 	_, err = os.Stat(divertDll)
 	if err != nil {
