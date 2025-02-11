@@ -481,13 +481,7 @@ func ModifyDNSResponse(packet []byte, tunDns *TunDnsV2) ([]byte, error) {
 		}
 	}
 	if isEdit {
-		//msg.Question = nil
-		//msg.Ns = nil
-		//	msg.Extra = nil
-
-		// 禁用压缩
-		//msg.Compress = false
-
+		msg.Compress = true
 		fmt.Printf("new msg:%+v\r\n", msg)
 		return msg.Pack()
 	}
