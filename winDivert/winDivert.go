@@ -6,6 +6,7 @@ package winDivert
 import (
 	_ "embed"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -15,10 +16,9 @@ import (
 	"time"
 
 	"github.com/dosgo/goSocksTap/comm"
-	"github.com/dosgo/goSocksTap/comm/netstat"
-	"github.com/dosgo/goSocksTap/socksTap"
 	"github.com/imgk/divert-go"
 	"github.com/miekg/dns"
+	"github.com/vishalkuo/bimap"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
@@ -398,7 +398,7 @@ func RedirectDNSV1(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPor
 	}
 }
 
-func RedirectDNSV2() {
+func RedirectDNSV2(pid uint32) {
 	var err error
 	_, err = os.Stat(divertDll)
 	if err != nil {
@@ -408,7 +408,7 @@ func RedirectDNSV2() {
 	winDivertRun = true
 
 	//监控本进程的端口用于过滤
-	//go NetEvent()
+	go NetEvent(0)
 
 	var filterIn = ""
 	filterIn = fmt.Sprintf("!impostor and udp.SrcPort=53")
@@ -423,39 +423,75 @@ func RedirectDNSV2() {
 	// 入站重定向循环
 	inboundBuf := make([]byte, 2024)
 	inboundAddr := divert.Address{}
-
+	inboundUdpHeader := &UDPHeader{}
+	tunDns := &TunDnsV2{}
+	tunDns.Ip2Domain = bimap.NewBiMap[string, string]()
 	for winDivertRun {
 		recvLen, err := inboundDivert.Recv(inboundBuf, &inboundAddr)
 		if err != nil {
 			log.Printf("winDivert recv failed: %v\r\n", err)
 			return
 		}
-		fmt.Printf("inboundBuf[:recvLen]:%s\r\n", inboundBuf[:recvLen])
+		isIpv6 := inboundBuf[0]>>4 == 6
+		ipHeadLen := 40 // Assuming IPv6 if not modified later
+		if !isIpv6 {
+			ipHeadLen = int(inboundBuf[0]&0xF) * 4
+		}
+		inboundUdpHeader.Reset()
+		inboundUdpHeader.Parse(inboundBuf[ipHeadLen:])
+		//如果是特定的端口直接转发跳过不
+		_, ok := dnsWhitelist.Load(inboundUdpHeader.SrcPort)
+		if !ok {
+			newBuf, err := ModifyDNSResponse(inboundBuf[ipHeadLen+8:recvLen], tunDns)
 
+			if err == nil {
+				fmt.Printf("sendBuf:%s\r\n", inboundBuf[ipHeadLen+8:recvLen])
+				fmt.Printf("recvBuf:%s\r\n", newBuf)
+				copy(inboundBuf[ipHeadLen+8:], newBuf[:len(inboundBuf[ipHeadLen+8:recvLen])])
+			}
+		}
 		divert.CalcChecksums(inboundBuf[:recvLen], &inboundAddr, 0)
 		inboundDivert.Send(inboundBuf[:recvLen], &inboundAddr)
 	}
 }
 
-func ModifyDNSResponse(packet []byte, tunDns *socksTap.TunDnsV2) ([]byte, error) {
+func ModifyDNSResponse(packet []byte, tunDns *TunDnsV2) ([]byte, error) {
 	msg := new(dns.Msg)
-	msg.Pack()
 	if err := msg.Unpack(packet); err != nil {
 		return packet, fmt.Errorf("解析DNS响应包失败: %v", err)
 	}
 	domain := msg.Question[0].Name
-	for _, answer := range msg.Answer {
+
+	fmt.Printf("domain:%s\r\n", domain)
+	fmt.Printf("src msg:%+v\r\n", msg)
+	isEdit := false
+	for i, answer := range msg.Answer {
 		if a, ok := answer.(*dns.A); ok {
 			_, excludeFlag := tunDns.ExcludeDomains.Load(domain)
 			//不是中国ip,又不是排除的ip
 			if !excludeFlag && !comm.IsChinaMainlandIP(a.A.String()) && comm.IsPublicIP(a.A) {
 				ip := tunDns.AllocIpByDomain(domain)
+				fmt.Printf("src ip:%s alloc ip :%s\r\n", a.A.String(), ip)
 				a.A = net.ParseIP(ip)
-				a.Hdr.Ttl = 5
+				fmt.Printf("i:%d\r\n", i)
+				//a.Hdr.Ttl = 5
+				msg.Answer[i] = a
+				isEdit = true
 			}
 		}
 	}
-	return msg.Pack()
+	if isEdit {
+		//msg.Question = nil
+		//msg.Ns = nil
+		//	msg.Extra = nil
+
+		// 禁用压缩
+		//msg.Compress = false
+
+		fmt.Printf("new msg:%+v\r\n", msg)
+		return msg.Pack()
+	}
+	return packet, errors.New("china ip")
 }
 
 func NetEvent(pid uint32) {
@@ -466,7 +502,7 @@ func NetEvent(pid uint32) {
 		return
 	}
 	winDivertRun = true
-	var filter = fmt.Sprintf("processId=%d and udp", os.Getpid())
+	var filter = fmt.Sprintf("processId=%d or processId=%d and udp", os.Getpid(), pid)
 
 	eventDivert, err := divert.Open(filter, divert.LayerFlow, divert.PriorityDefault, divert.FlagSniff|divert.FlagRecvOnly)
 	if err != nil {
@@ -498,13 +534,6 @@ func NetEvent(pid uint32) {
 			}
 		}
 	}()
-	ports, err := netstat.GetUdpBindList(os.Getpid(), false)
-	if err == nil {
-		for _, binding := range ports {
-			// 在这里可以添加其他操作
-			dnsWhitelist.Store(binding, time.Now().Unix())
-		}
-	}
 }
 
 func CloseWinDivert() {
