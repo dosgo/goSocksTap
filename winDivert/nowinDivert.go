@@ -3,7 +3,9 @@
 
 package winDivert
 
-import "github.com/dosgo/goSocksTap/tunDns"
+import (
+	"github.com/dosgo/goSocksTap/tunDns"
+)
 
 /*only windows*/
 func RedirectDNS(dnsAddr string, dnsPort uint16, sendStartPort int, sendEndPort int, localHost bool) {
