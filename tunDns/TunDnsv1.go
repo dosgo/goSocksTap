@@ -254,9 +254,7 @@ func (tunDns *TunDns) ModifyDNSResponse(packet []byte) ([]byte, error) {
 		return packet, fmt.Errorf("解析DNS响应包失败: %v", err)
 	}
 	domain := msg.Question[0].Name
-
-	fmt.Printf("domain:%s\r\n", domain)
-	fmt.Printf("src msg:%+v\r\n", msg)
+	fmt.Printf("ModifyDNSResponse domain:%s\r\n", domain)
 	isEdit := false
 	for i, answer := range msg.Answer {
 		if a, ok := answer.(*dns.A); ok {
@@ -264,10 +262,8 @@ func (tunDns *TunDns) ModifyDNSResponse(packet []byte) ([]byte, error) {
 			//不是中国ip,又不是排除的ip
 			if !excludeFlag && !comm.IsChinaMainlandIP(a.A.String()) && comm.IsPublicIP(a.A) {
 				ip := tunDns.allocIpByDomain(domain)
-				fmt.Printf("src ip:%s alloc ip :%s\r\n", a.A.String(), ip)
 				a.A = net.ParseIP(ip)
-				fmt.Printf("i:%d\r\n", i)
-				//a.Hdr.Ttl = 5
+				a.Hdr.Ttl = 25
 				msg.Answer[i] = a
 				isEdit = true
 			}
