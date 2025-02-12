@@ -31,6 +31,7 @@ type TunDns struct {
 	Ip2Domain      *bimap.BiMap[string, string]
 	SendMinPort    int
 	SendMaxPort    int
+	ExcludePorts   sync.Map
 }
 
 func NewTunDns(addr string, port uint16, _tunGW string, _tunMask string) *TunDns {
