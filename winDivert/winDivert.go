@@ -14,10 +14,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bi-zone/etw"
 	"github.com/dosgo/goSocksTap/tunDns"
 	"github.com/imgk/divert-go"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+	"golang.org/x/sys/windows"
 )
 
 var outboundDivert *divert.Handle
@@ -25,6 +27,7 @@ var inboundDivert *divert.Handle
 var eventDivert *divert.Handle
 var winDivertRun = false
 var netEventRun = false
+var etwSession *etw.Session
 
 var divertDll = "WinDivert.dll"
 var divertSys = "WinDivert32.sys"
@@ -269,8 +272,6 @@ func HackDNSData(tunDns *tunDns.TunDns) {
 		if !ok {
 			newBuf, err := tunDns.ModifyDNSResponse(inboundBuf[ipHeadLen+8 : recvLen])
 			if err == nil {
-				fmt.Printf("sendBuf:%s\r\n", inboundBuf[ipHeadLen+8:recvLen])
-				fmt.Printf("recvBuf:%s\r\n", newBuf)
 				copy(inboundBuf[ipHeadLen+8:], newBuf[:len(inboundBuf[ipHeadLen+8:recvLen])])
 			}
 		}
@@ -300,6 +301,7 @@ func NetEvent(pid uint32, tunDns *tunDns.TunDns) {
 		tunDns.ExcludePorts.Delete(key)
 		return true
 	})
+	etwSession = monitorDns(pid, tunDns)
 	//udp事件监控
 	inboundBuf := make([]byte, 2024)
 	addr := divert.Address{}
@@ -318,6 +320,7 @@ func NetEvent(pid uint32, tunDns *tunDns.TunDns) {
 			fmt.Printf("remove RemotePort:%d\r\n", addr.Flow().LocalPort)
 		}
 	}
+
 }
 
 func CloseWinDivert() {
@@ -339,4 +342,35 @@ func CloseNetEvent() {
 		eventDivert.Close()
 		eventDivert = nil
 	}
+	if etwSession != nil {
+		etwSession.Close()
+		etwSession = nil
+	}
+}
+
+func monitorDns(pid uint32, tunDns *tunDns.TunDns) *etw.Session {
+	// Subscribe to Microsoft-Windows-DNS-Client
+	guid, _ := windows.GUIDFromString("{1C95126E-7EEA-49A9-A3FE-A378B03DDB4D}")
+	session, err := etw.NewSession(guid)
+	if err != nil {
+		return nil
+	}
+	// Wait for "DNS query request" events to log outgoing DNS requests.
+	cb := func(e *etw.Event) {
+		if e.Header.ID != 3006 {
+			return
+		}
+		if e.Header.ProcessID != pid {
+			return
+		}
+		if data, err := e.EventProperties(); err == nil && data["QueryType"] == "1" {
+			tunDns.ExcludeDomains.Store(data["QueryName"].(string)+".", 1)
+			log.Printf("PID %d just queried DNS for domain:%v", e.Header.ProcessID, data["QueryName"])
+		}
+	}
+
+	if err := session.Process(cb); err != nil {
+		log.Printf("[ERR] Got error processing events: %s", err)
+	}
+	return session
 }
