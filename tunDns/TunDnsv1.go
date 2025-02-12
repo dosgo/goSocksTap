@@ -178,7 +178,7 @@ func (tunDns *TunDns) modifyResponse(msg *dns.Msg, domain string, qtype uint16) 
 					ip = tunDns.allocIpByDomain(domain)
 				}
 				a.A = net.ParseIP(ip)
-				a.Hdr.Ttl = 1
+				a.Hdr.Ttl = 60
 				msg.Answer[i] = a
 				isEdit = true
 			}
@@ -270,7 +270,7 @@ func (tunDns *TunDns) ModifyDNSResponse(packet []byte) ([]byte, error) {
 					ip = tunDns.allocIpByDomain(domain)
 				}
 				a.A = net.ParseIP(ip)
-				a.Hdr.Ttl = 25
+				a.Hdr.Ttl = 60
 				msg.Answer[i] = a
 				isEdit = true
 			}
