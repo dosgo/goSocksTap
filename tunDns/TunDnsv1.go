@@ -277,7 +277,7 @@ func (tunDns *TunDns) ModifyDNSResponse(packet []byte) ([]byte, error) {
 		}
 	}
 	if isEdit {
-		fmt.Printf("ModifyDNSResponse domain:%s\r\n", domain)
+		log.Printf("ModifyDNSResponse domain:%s\r\n", domain)
 		msg.Compress = true
 		return msg.Pack()
 	}
