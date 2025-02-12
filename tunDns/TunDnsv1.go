@@ -1,221 +1,281 @@
-package socksTap
+package tunDns
 
 import (
+	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dosgo/goSocksTap/comm"
-	"github.com/dosgo/goSocksTap/comm/dot"
-	"github.com/dosgo/goSocksTap/comm/netstat"
-	"github.com/dosgo/goSocksTap/comm/socks"
-	"github.com/dosgo/goSocksTap/tunDns"
-	"github.com/dosgo/goSocksTap/winDivert"
-
-	"github.com/dosgo/go-tun2socks/core"
-	"github.com/dosgo/go-tun2socks/tun"
-	"github.com/dosgo/go-tun2socks/tun2socks"
-
-	"github.com/txthinking/socks5"
+	"github.com/miekg/dns"
+	"github.com/vishalkuo/bimap"
 )
 
-type SocksTap struct {
-	localSocks     string
-	run            bool
-	tunDns         *tunDns.TunDns
-	socksServerPid uint32
-	safeDns        *dot.DoT
-	udpProxy       bool
-	tunDev         io.ReadWriteCloser
+type TunDns struct {
+	srcDns    string
+	dnsCache  *comm.DnsCacheV1
+	run       bool
+	udpServer *dns.Server
+	//excludeDomains      map[string]uint8
+	ExcludeDomains sync.Map
+	DnsAddr        string
+	DnsPort        uint16
+	tunAddr        string
+	tunGW          string
+	tunMask        string
+	Ip2Domain      *bimap.BiMap[string, string]
+	SendMinPort    int
+	SendMaxPort    int
 }
 
-var tunAddr = "10.0.0.2"
-var tunGW = "10.0.0.1"
-var tunMask = "255.255.0.0"
-
-func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy bool) {
-	fakeDns.localSocks = localSocks
-	fakeDns.udpProxy = udpProxy
-	tunAddr, tunGW = comm.GetUnusedTunAddr()
-	fakeDns.safeDns = dot.NewDot("dns.google", "8.8.8.8:853", localSocks)
-
-	fakeDns.tunDns = tunDns.NewTunDns(tunAddr, 53, tunGW, tunMask)
-	fakeDns.tunDns.SendMinPort = 600
-	fakeDns.tunDns.SendMaxPort = 700
-
+func NewTunDns(addr string, port uint16, _tunGW string, _tunMask string) *TunDns {
+	tunDns := &TunDns{DnsPort: port, DnsAddr: addr, tunAddr: addr, tunGW: _tunGW, tunMask: _tunMask}
+	tunDns.Ip2Domain = bimap.NewBiMap[string, string]()
+	tunDns.dnsCache = &comm.DnsCacheV1{Cache: make(map[string]comm.CachedResponse, 128)}
+	tunDns.SendMinPort = 600
+	tunDns.SendMaxPort = 700
 	if runtime.GOOS == "windows" {
-		fakeDns.socksServerPid, _ = netstat.PortGetPid(localSocks)
-		fakeDns.tunDns.DnsPort = 653 //为了避免死循环windows使用653端口
+		tunDns.DnsPort = 653 //为了避免死循环windows使用653端口
 	}
-	fakeDns._startTun(1500)
-	if excludeDomain != "" {
-		excludeDomainList := strings.Split(excludeDomain, ";")
-		for i := 0; i < len(excludeDomainList); i++ {
-			fakeDns.tunDns.ExcludeDomains.Store(excludeDomainList[i]+".", 1)
+	return tunDns
+}
+
+func (tunDns *TunDns) Exchange(m *dns.Msg) (r *dns.Msg, rtt time.Duration, err error) {
+	dnsClient := &dns.Client{
+		Net:            "udp",
+		UDPSize:        4096,
+		SingleInflight: false,
+		ReadTimeout:    time.Duration(10) * time.Second,
+		WriteTimeout:   time.Duration(10) * time.Second,
+	}
+	if runtime.GOOS != "windows" {
+		return dnsClient.Exchange(m, tunDns.srcDns)
+	}
+	_dialer := comm.GetPortDialer(tunDns.SendMinPort, tunDns.SendMaxPort)
+	conn, err := _dialer.Dial("udp", tunDns.srcDns)
+	if err == nil {
+		defer conn.Close()
+		dnsClientConn := new(dns.Conn)
+		dnsClientConn.Conn = conn
+		dnsClientConn.UDPSize = 4096
+		defer dnsClientConn.Close()
+		return dnsClient.ExchangeWithConn(m, dnsClientConn)
+	}
+	return nil, 0, errors.New("port use.")
+}
+
+func (tunDns *TunDns) Shutdown() {
+	tunDns.run = false
+	if tunDns.udpServer != nil {
+		tunDns.udpServer.Shutdown()
+	}
+}
+
+/*检测旧dns改变*/
+func (tunDns *TunDns) checkDnsChange() {
+	for tunDns.run {
+		conn, err := net.DialTimeout("tcp", tunDns.srcDns, time.Second*1)
+		//可能dns变了，
+		if err != nil {
+			oldDns := comm.GetUseDns(tunDns.DnsAddr, tunDns.tunGW, "")
+			//检测网关DNS是否改变
+			if strings.Index(tunDns.srcDns, oldDns) == -1 {
+				tunDns.srcDns = oldDns + ":53"
+			}
+		} else {
+			conn.Close()
+		}
+		time.Sleep(time.Second * 10)
+	}
+}
+
+func (tunDns *TunDns) StartSmartDns() {
+	tunDns.run = true
+	tunDns.udpServer = &dns.Server{
+		Net:          "udp4",
+		Addr:         ":" + strconv.Itoa(int(tunDns.DnsPort)),
+		Handler:      dns.HandlerFunc(tunDns.ServeDNS),
+		UDPSize:      4096,
+		ReadTimeout:  time.Duration(10) * time.Second,
+		WriteTimeout: time.Duration(10) * time.Second,
+	}
+
+	tunDns.srcDns = comm.GetUseDns(tunDns.DnsAddr, tunDns.tunGW, "") + ":53"
+	go tunDns.udpServer.ListenAndServe()
+	go tunDns.checkDnsChange()
+	go tunDns.clearDnsCache()
+}
+
+func (tunDns *TunDns) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
+	domain := r.Question[0].Name
+	qtype := r.Question[0].Qtype
+	ipLog, ok := tunDns.Ip2Domain.GetInverse(domain)
+	var response *dns.Msg
+	var err error
+	log.Println("cache  allocIp dns:" + domain)
+	_, excludeFlag := tunDns.ExcludeDomains.Load(domain)
+	if ok && !excludeFlag && qtype == dns.TypeA {
+		log.Println("cache  allocIp dns:" + domain)
+		response = tunDns.overrideResponse(r, ipLog, 1)
+	} else {
+		if excludeFlag {
+			tunDns.Ip2Domain.DeleteInverse(domain)
+		}
+
+		cacheResp := tunDns.dnsCache.ReadDnsCache(domain+fmt.Sprintf("%d", qtype), 120)
+
+		if cacheResp == nil {
+			// 转发请求到目标 DNS 服务器
+			response, _, err = tunDns.Exchange(r)
+			if err != nil {
+				log.Println("ServeDNS domain:" + domain + " err:" + err.Error())
+				return
+			}
+			// 修改特定 IP 的响应
+			tunDns.modifyResponse(response, domain, qtype)
+		} else {
+			log.Println("cache dns:" + domain)
+			response = cacheResp
+			response.SetReply(r)
 		}
 	}
 
-	//edit DNS
-	if runtime.GOOS != "windows" {
-		fakeDns.tunDns.StartSmartDns()
-		comm.SetNetConf(fakeDns.tunDns.DnsAddr)
-	}
-	if runtime.GOOS == "windows" {
-		go winDivert.RedirectDNSV2(fakeDns.socksServerPid, fakeDns.tunDns)
-
-	}
-	//udp limit auto remove
-	fakeDns.run = true
-	go fakeDns.task()
-}
-
-func (fakeDns *SocksTap) Shutdown() {
-	if fakeDns.tunDev != nil {
-		fakeDns.tunDev.Close()
-	}
-	if fakeDns.tunDns != nil {
-		comm.ResetNetConf(fakeDns.tunDns.DnsAddr)
-		fakeDns.tunDns.Shutdown()
-	}
-	fakeDns.run = false
-	winDivert.CloseWinDivert()
-}
-
-func (fakeDns *SocksTap) _startTun(mtu int) error {
-	var err error
-	fakeDns.tunDev, err = tun.RegTunDev("goSocksTap", tunAddr, tunMask, tunGW, "")
 	if err != nil {
-		return err
+		response.SetRcode(r, dns.RcodeServerFailure)
 	}
-	go func() {
-		time.Sleep(time.Second * 1)
-		comm.AddRoute(tunAddr, tunGW, tunMask)
-	}()
-	go tun2socks.ForwardTransportFromIo(fakeDns.tunDev, mtu, fakeDns.tcpForwarder, fakeDns.udpForwarder)
-	return nil
+	w.WriteMsg(response)
 }
-func (fakeDns *SocksTap) task() {
-	for fakeDns.run {
-		if runtime.GOOS == "windows" {
-			pid, err := netstat.PortGetPid(fakeDns.localSocks)
-			if err == nil && pid > 0 {
-				fakeDns.socksServerPid = pid
+
+func (tunDns *TunDns) overrideResponse(msg *dns.Msg, ip string, ttl uint32) *dns.Msg {
+	resp := &dns.Msg{}
+	resp.SetReply(msg)
+	resp.Authoritative = false
+	v := &dns.A{
+		Hdr: dns.RR_Header{Name: msg.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: ttl},
+		A:   net.ParseIP(ip),
+	}
+	resp.Answer = []dns.RR{v}
+	return resp
+}
+
+func (tunDns *TunDns) modifyResponse(msg *dns.Msg, domain string, qtype uint16) {
+
+	var isEdit = false
+	for i, ans := range msg.Answer {
+		switch a := ans.(type) {
+		case *dns.A:
+			srcIp := a.A.String()
+			_, excludeFlag := tunDns.ExcludeDomains.Load(domain)
+			//不是中国ip,又不是排除的ip
+			if !excludeFlag && !comm.IsChinaMainlandIP(srcIp) && comm.IsPublicIP(a.A) {
+				ip := tunDns.allocIpByDomain(domain)
+				a.A = net.ParseIP(ip)
+				a.Hdr.Ttl = 1
+				msg.Answer[i] = a
+				isEdit = true
+			}
+		case *dns.AAAA:
+			//if a.AAAA.String() == specificIP {
+			//a.AAAA = net.ParseIP(specificIP)
+			//}
+		}
+	}
+	//没有修改过的缓存
+	if !isEdit && msg.Rcode == dns.RcodeSuccess {
+		tunDns.dnsCache.WriteDnsCache(domain+fmt.Sprintf("%d", qtype), msg)
+	}
+	msg.Authoritative = false
+}
+
+/*给域名分配私有地址*/
+func (tunDns *TunDns) allocIpByDomain(domain string) string {
+	var ip = ""
+	for i := 0; i <= 5; i++ {
+		ip = comm.GetCidrRandIpByNet(tunDns.tunAddr, tunDns.tunMask)
+		_, ok := tunDns.Ip2Domain.Get(ip)
+		if !ok && ip != tunDns.tunAddr {
+			tunDns.Ip2Domain.Insert(ip, domain)
+			break
+		} else {
+			log.Println("ip used up")
+			ip = ""
+		}
+	}
+	return ip
+}
+
+/*dns缓存自动清理*/
+func (tunDns *TunDns) clearDnsCache() {
+	for tunDns.run {
+		tunDns.dnsCache.Free(120)
+		time.Sleep(time.Second * 60)
+	}
+}
+
+/*
+本地dns解析有缓存
+domain 域名有最后一个"."
+*/
+func (tunDns *TunDns) LocalResolve(domain string, ipType int) (net.IP, uint32, error) {
+	query := &dns.Msg{}
+	if ipType == 4 {
+		query.SetQuestion(domain, dns.TypeA)
+	}
+	if ipType == 6 {
+		query.SetQuestion(domain, dns.TypeAAAA)
+	}
+	response, _, _ := tunDns.Exchange(query)
+	// 解析DNS响应
+	for _, answer := range response.Answer {
+		// 如果答案是A记录（IPv4地址）
+		if a, ok := answer.(*dns.A); ok {
+			if ipType == 4 {
+				return a.A, a.Hdr.Ttl, nil
 			}
 		}
-		fakeDns.safeDns.AutoFree()
-		time.Sleep(time.Second * 30)
+		// 如果答案是AAAA记录（IPv6地址）
+		if aaaa, ok := answer.(*dns.AAAA); ok {
+			if ipType == 6 {
+				return aaaa.AAAA, aaaa.Hdr.Ttl, nil
+			}
+		}
 	}
+	return nil, 0, errors.New("dns error")
 }
+func (tunDns *TunDns) ModifyDNSResponse(packet []byte) ([]byte, error) {
+	msg := new(dns.Msg)
+	if err := msg.Unpack(packet); err != nil {
+		return packet, fmt.Errorf("解析DNS响应包失败: %v", err)
+	}
+	domain := msg.Question[0].Name
 
-func (fakeDns *SocksTap) tcpForwarder(conn core.CommTCPConn) error {
-	defer conn.Close()
-	var srcAddr = conn.LocalAddr().String()
-
-	//不走代理
-	if netstat.IsSocksServerAddr(fakeDns.socksServerPid, conn.RemoteAddr().String()) {
-
-		remoteAddr := fakeDns.dnsToDomain(srcAddr)
-		if remoteAddr == "" {
-			return nil
-		}
-		remoteAddrs := strings.Split(remoteAddr, ":")
-		domain := remoteAddrs[0]
-		fakeDns.tunDns.ExcludeDomains.Store(domain, 1) //标记为跳过代理域名
-		fmt.Printf("add excludeDomains domain:%s\r\n", domain)
-		localIp, _, err := fakeDns.tunDns.LocalResolve(domain, 4)
-		if err != nil {
-			log.Printf("localIp:%s srcAddr:%s domain:%s\r\n", localIp.String(), srcAddr, domain[0:len(domain)-1])
-			return nil
-		}
-		socksConn, err := net.DialTimeout("tcp", localIp.String()+":"+remoteAddrs[1], time.Second*15)
-		if err != nil {
-			log.Printf("tcpForwarder err:%v", err)
-			return nil
-		}
-		defer socksConn.Close()
-		comm.ConnPipe(conn, socksConn, time.Second*70)
-	} else {
-		//走代理
-		var remoteAddr = ""
-		var addrType = 0x01
-		remoteAddr = fakeDns.dnsToAddr(srcAddr)
-		if remoteAddr == "" {
-			log.Printf("remoteAddr:%s srcAddr:%s\r\n", remoteAddr, srcAddr)
-			return nil
-		}
-		socksConn, err := net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
-		if err != nil {
-			log.Printf("tcpForwarder err2:%v", err)
-			return nil
-		}
-		defer socksConn.Close()
-		if socks.SocksCmd(socksConn, 1, uint8(addrType), remoteAddr, true) == nil {
-			comm.ConnPipe(conn, socksConn, time.Second*120)
+	fmt.Printf("domain:%s\r\n", domain)
+	fmt.Printf("src msg:%+v\r\n", msg)
+	isEdit := false
+	for i, answer := range msg.Answer {
+		if a, ok := answer.(*dns.A); ok {
+			_, excludeFlag := tunDns.ExcludeDomains.Load(domain)
+			//不是中国ip,又不是排除的ip
+			if !excludeFlag && !comm.IsChinaMainlandIP(a.A.String()) && comm.IsPublicIP(a.A) {
+				ip := tunDns.allocIpByDomain(domain)
+				fmt.Printf("src ip:%s alloc ip :%s\r\n", a.A.String(), ip)
+				a.A = net.ParseIP(ip)
+				fmt.Printf("i:%d\r\n", i)
+				//a.Hdr.Ttl = 5
+				msg.Answer[i] = a
+				isEdit = true
+			}
 		}
 	}
-	return nil
-}
-
-func (fakeDns *SocksTap) udpForwarder(conn core.CommUDPConn, ep core.CommEndpoint) error {
-	var srcAddr = conn.LocalAddr().String()
-	var remoteAddr = ""
-	defer conn.Close()
-	remoteAddr = fakeDns.dnsToAddr(srcAddr)
-	if remoteAddr == "" {
-		return nil
+	if isEdit {
+		msg.Compress = true
+		fmt.Printf("new msg:%+v\r\n", msg)
+		return msg.Pack()
 	}
-	var udpConn net.Conn
-	var err error
-	if fakeDns.udpProxy {
-		client, err := socks5.NewClient(fakeDns.localSocks, "", "", 20, 60)
-		if err != nil {
-			return err
-		}
-		udpConn, err = client.Dial("udp", remoteAddr)
-		if err != nil {
-			return err
-		}
-	} else {
-		//直连
-		udpConn, err = net.DialTimeout("udp", remoteAddr, 5*time.Second)
-		if err != nil {
-			log.Printf("UdpDirect remoteAddr:%s err:%v\r\n", remoteAddr, err)
-			return err
-		}
-	}
-	defer udpConn.Close()
-	comm.ConnPipe(udpConn, conn, time.Minute*2)
-	return nil
-}
-
-/*dns addr swap*/
-func (fakeDns *SocksTap) dnsToAddr(remoteAddr string) string {
-	remoteAddr = fakeDns.dnsToDomain(remoteAddr)
-	if remoteAddr == "" {
-		return ""
-	}
-	remoteAddrs := strings.Split(remoteAddr, ":")
-	domain := remoteAddrs[0]
-	ip, err := fakeDns.safeDns.Resolve(domain[0:len(domain)-1], 4)
-	if err != nil {
-		return ""
-	}
-	return ip + ":" + remoteAddrs[1]
-}
-
-/*dns addr swap*/
-func (fakeDns *SocksTap) dnsToDomain(remoteAddr string) string {
-	if fakeDns.tunDns == nil {
-		return ""
-	}
-	remoteAddrs := strings.Split(remoteAddr, ":")
-	_domain, ok := fakeDns.tunDns.Ip2Domain.Get(remoteAddrs[0])
-	if !ok {
-		return ""
-	}
-	return _domain + ":" + remoteAddrs[1]
+	return packet, errors.New("china ip")
 }
