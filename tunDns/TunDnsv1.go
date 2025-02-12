@@ -173,7 +173,10 @@ func (tunDns *TunDns) modifyResponse(msg *dns.Msg, domain string, qtype uint16) 
 			_, excludeFlag := tunDns.ExcludeDomains.Load(domain)
 			//不是中国ip,又不是排除的ip
 			if !excludeFlag && !comm.IsChinaMainlandIP(srcIp) && comm.IsPublicIP(a.A) {
-				ip := tunDns.allocIpByDomain(domain)
+				ip, ok := tunDns.Ip2Domain.GetInverse(domain)
+				if !ok {
+					ip = tunDns.allocIpByDomain(domain)
+				}
 				a.A = net.ParseIP(ip)
 				a.Hdr.Ttl = 1
 				msg.Answer[i] = a
