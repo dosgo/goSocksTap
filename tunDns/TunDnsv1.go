@@ -271,7 +271,6 @@ func (tunDns *TunDns) ModifyDNSResponse(packet []byte) ([]byte, error) {
 	}
 	if isEdit {
 		msg.Compress = true
-		fmt.Printf("new msg:%+v\r\n", msg)
 		return msg.Pack()
 	}
 	return packet, errors.New("china ip")
