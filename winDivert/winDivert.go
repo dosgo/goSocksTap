@@ -14,12 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bi-zone/etw"
 	"github.com/dosgo/goSocksTap/tunDns"
 	"github.com/imgk/divert-go"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
-	"golang.org/x/sys/windows"
 )
 
 var outboundDivert *divert.Handle
@@ -27,7 +25,6 @@ var inboundDivert *divert.Handle
 var eventDivert *divert.Handle
 var winDivertRun = false
 var netEventRun = false
-var etwSession *etw.Session
 
 var divertDll = "WinDivert.dll"
 var divertSys = "WinDivert32.sys"
@@ -340,37 +337,4 @@ func CloseNetEvent() {
 		eventDivert.Close()
 		eventDivert = nil
 	}
-	if etwSession != nil {
-		etwSession.Close()
-		etwSession = nil
-	}
-}
-
-func monitorDns(pid uint32, tunDns *tunDns.TunDns) {
-	// Subscribe to Microsoft-Windows-DNS-Client
-	guid, err := windows.GUIDFromString("{1C95126E-7EEA-49A9-A3FE-A378B03DDB4D}")
-	etwSession, err = etw.NewSession(guid)
-	if err != nil {
-		return
-	}
-	// Wait for "DNS query request" events to log outgoing DNS requests.
-	cb := func(e *etw.Event) {
-		if e.Header.ID != 3006 {
-			return
-		}
-		if e.Header.ProcessID != pid {
-			return
-		}
-		if data, err := e.EventProperties(); err == nil && data["QueryType"] == "1" {
-			tunDns.ExcludeDomains.Store(data["QueryName"].(string)+".", 1)
-			log.Printf("PID %d just queried DNS for domain:%v", e.Header.ProcessID, data["QueryName"])
-		}
-	}
-	time.Sleep(time.Second * 1)
-
-	go func() {
-		if err = etwSession.Process(cb); err != nil {
-			log.Printf("[ERR] Got error processing events: %s", err)
-		}
-	}()
 }
