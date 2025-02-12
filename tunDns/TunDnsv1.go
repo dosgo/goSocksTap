@@ -17,11 +17,10 @@ import (
 )
 
 type TunDns struct {
-	srcDns    string
-	dnsCache  *comm.DnsCacheV1
-	run       bool
-	udpServer *dns.Server
-	//excludeDomains      map[string]uint8
+	srcDns         string
+	dnsCache       *comm.DnsCacheV1
+	run            bool
+	udpServer      *dns.Server
 	ExcludeDomains sync.Map
 	DnsAddr        string
 	DnsPort        uint16
@@ -230,7 +229,10 @@ func (tunDns *TunDns) LocalResolve(domain string, ipType int) (net.IP, uint32, e
 	if ipType == 6 {
 		query.SetQuestion(domain, dns.TypeAAAA)
 	}
-	response, _, _ := tunDns.Exchange(query)
+	response, _, err := tunDns.Exchange(query)
+	if err != nil {
+		return nil, 0, errors.New("dns error")
+	}
 	// 解析DNS响应
 	for _, answer := range response.Answer {
 		// 如果答案是A记录（IPv4地址）
@@ -254,7 +256,6 @@ func (tunDns *TunDns) ModifyDNSResponse(packet []byte) ([]byte, error) {
 		return packet, fmt.Errorf("解析DNS响应包失败: %v", err)
 	}
 	domain := msg.Question[0].Name
-	fmt.Printf("ModifyDNSResponse domain:%s\r\n", domain)
 	isEdit := false
 	for i, answer := range msg.Answer {
 		if a, ok := answer.(*dns.A); ok {
@@ -270,6 +271,7 @@ func (tunDns *TunDns) ModifyDNSResponse(packet []byte) ([]byte, error) {
 		}
 	}
 	if isEdit {
+		fmt.Printf("ModifyDNSResponse domain:%s\r\n", domain)
 		msg.Compress = true
 		return msg.Pack()
 	}

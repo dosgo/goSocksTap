@@ -301,7 +301,7 @@ func NetEvent(pid uint32, tunDns *tunDns.TunDns) {
 		tunDns.ExcludePorts.Delete(key)
 		return true
 	})
-	etwSession = monitorDns(pid, tunDns)
+	//monitorDns(pid, tunDns)
 	//udp事件监控
 	inboundBuf := make([]byte, 2024)
 	addr := divert.Address{}
@@ -313,11 +313,9 @@ func NetEvent(pid uint32, tunDns *tunDns.TunDns) {
 		}
 		switch addr.Event() {
 		case divert.EventFlowEstablished:
-			fmt.Printf("bind RemotePort:%d\r\n", addr.Flow().LocalPort)
 			tunDns.ExcludePorts.Store(addr.Flow().LocalPort, time.Now().Unix())
 		case divert.EventFlowDeleted:
 			tunDns.ExcludePorts.Delete(addr.Flow().LocalPort)
-			fmt.Printf("remove RemotePort:%d\r\n", addr.Flow().LocalPort)
 		}
 	}
 
@@ -348,12 +346,12 @@ func CloseNetEvent() {
 	}
 }
 
-func monitorDns(pid uint32, tunDns *tunDns.TunDns) *etw.Session {
+func monitorDns(pid uint32, tunDns *tunDns.TunDns) {
 	// Subscribe to Microsoft-Windows-DNS-Client
-	guid, _ := windows.GUIDFromString("{1C95126E-7EEA-49A9-A3FE-A378B03DDB4D}")
-	session, err := etw.NewSession(guid)
+	guid, err := windows.GUIDFromString("{1C95126E-7EEA-49A9-A3FE-A378B03DDB4D}")
+	etwSession, err = etw.NewSession(guid)
 	if err != nil {
-		return nil
+		return
 	}
 	// Wait for "DNS query request" events to log outgoing DNS requests.
 	cb := func(e *etw.Event) {
@@ -368,9 +366,11 @@ func monitorDns(pid uint32, tunDns *tunDns.TunDns) *etw.Session {
 			log.Printf("PID %d just queried DNS for domain:%v", e.Header.ProcessID, data["QueryName"])
 		}
 	}
+	time.Sleep(time.Second * 1)
 
-	if err := session.Process(cb); err != nil {
-		log.Printf("[ERR] Got error processing events: %s", err)
-	}
-	return session
+	go func() {
+		if err = etwSession.Process(cb); err != nil {
+			log.Printf("[ERR] Got error processing events: %s", err)
+		}
+	}()
 }

@@ -57,9 +57,9 @@ func (fakeDns *SocksTap) Start(localSocks string, excludeDomain string, udpProxy
 		}
 	}
 
+	fakeDns.tunDns.StartSmartDns()
 	//edit DNS
 	if runtime.GOOS != "windows" {
-		fakeDns.tunDns.StartSmartDns()
 		comm.SetNetConf(fakeDns.tunDns.DnsAddr)
 	} else {
 		go winDivert.NetEvent(uint32(fakeDns.socksServerPid), fakeDns.tunDns)
