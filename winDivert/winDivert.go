@@ -265,7 +265,7 @@ func HackDNSData(tunDns *tunDns.TunDns) {
 		inboundUdpHeader.Reset()
 		inboundUdpHeader.Parse(inboundBuf[ipHeadLen:])
 		//如果是特定的端口直接转发跳过不
-		_, ok := tunDns.ExcludePorts.Load(inboundUdpHeader.SrcPort)
+		_, ok := tunDns.ExcludePorts.Load(inboundUdpHeader.DstPort)
 		if !ok {
 			newBuf, err := tunDns.ModifyDNSResponse(inboundBuf[ipHeadLen+8 : recvLen])
 			if err == nil {
