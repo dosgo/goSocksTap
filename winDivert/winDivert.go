@@ -327,14 +327,13 @@ func CloseWinDivert() {
 		inboundDivert.Close()
 	}
 	if eventDivert != nil {
-		eventDivert.Close()
+		eventDivert = nil
 	}
 }
 
 func CloseNetEvent() {
 	netEventRun = false
 	if eventDivert != nil {
-		eventDivert.Close()
 		eventDivert = nil
 	}
 }
