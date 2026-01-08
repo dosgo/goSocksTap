@@ -10,11 +10,7 @@ require (
 	github.com/StackExchange/wmi v1.2.1
 	github.com/bi-zone/etw v0.0.0-20210519083747-fe9042eb0ea8
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
-<<<<<<< HEAD
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-=======
-	github.com/cilium/ebpf v0.12.3
->>>>>>> 261738ff6a45e9bdf03b959e514ce69ec02e5577
 	github.com/imgk/divert-go v0.0.0-20220205193416-faaa83c2c10a
 	github.com/miekg/dns v1.1.59
 	github.com/songgao/water v0.0.0-20200317203138-2b4b6d7c09d8
