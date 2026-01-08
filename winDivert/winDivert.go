@@ -9,13 +9,16 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/dosgo/goSocksTap/tunDns"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/imgk/divert-go"
+	"github.com/miekg/dns"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
@@ -316,6 +319,141 @@ func NetEvent(pid uint32, tunDns *tunDns.TunDns) {
 		}
 	}
 
+}
+
+var addrRecords = expirable.NewLRU[string, bool](10000, nil, time.Minute*5)
+
+func NetEventRecords() {
+	var err error
+	_, err = os.Stat(divertDll)
+	if err != nil {
+		log.Printf("not found :%s\r\n", divertDll)
+		return
+	}
+	netEventRun = true
+	var filter = fmt.Sprintf("!loopback")
+
+	eventDivert, err := divert.Open(filter, divert.LayerFlow, divert.PriorityDefault, divert.FlagSniff|divert.FlagRecvOnly)
+	if err != nil {
+		log.Printf("winDivert open failed: %v\r\n", err)
+		return
+	}
+	defer inboundDivert.Close()
+
+	//monitorDns(pid, tunDns)
+	//udp事件监控
+	inboundBuf := make([]byte, 2024)
+	addr := divert.Address{}
+	for netEventRun {
+		_, err := eventDivert.Recv(inboundBuf, &addr)
+		if err != nil {
+			log.Printf("winDivert recv failed: %v\r\n", err)
+			return
+		}
+
+		var localIP netip.Addr
+		var remoteIP netip.Addr
+
+		flow := addr.Flow()
+		if addr.Layer() == 1 || addr.Layer() == 5 {
+			localIP = ParseIPFromUint8(flow.LocalAddress, true)
+			remoteIP = ParseIPFromUint8(flow.RemoteAddress, true)
+		} else {
+			localIP = ParseIPFromUint8(flow.LocalAddress, false)
+
+			remoteIP = ParseIPFromUint8(flow.RemoteAddress, false)
+		}
+
+		switch addr.Event() {
+		case divert.EventFlowEstablished:
+			//tunDns.ExcludePorts.Store(addr.Flow().LocalPort, time.Now().Unix())
+			addrRecords.Add(remoteIP.String(), true)
+			fmt.Printf("add addr %s %d  rddr:%s rport:%d pid:%d\r\n", localIP.String(), addr.Flow().LocalPort, remoteIP.String(), addr.Flow().RemotePort, flow.ProcessID)
+		case divert.EventFlowDeleted:
+			addrRecords.Remove(remoteIP.String())
+			//fmt.Printf("remote addr %s %d \r\n", localIP.String(), addr.Flow().LocalPort)
+			//tunDns.ExcludePorts.Delete(addr.Flow().LocalPort)
+		}
+	}
+}
+
+func ParseIPFromUint8(data [16]uint8, isIPv6 bool) netip.Addr {
+	if isIPv6 {
+		return netip.AddrFrom16(data)
+	}
+	// IPv4 转换：网络字节序是大端，直接读取前 4 字节
+	// 如果你的数据在数组里是 [127, 0, 0, 1]，BigEndian.Uint32 会读成 0x7F000001
+	// netip.AddrFrom4 会正确处理这种标准顺序
+	return netip.AddrFrom4([4]byte{data[3], data[2], data[1], data[0]})
+}
+
+// CollectDNSRecords 拦截并解析所有 DNS 返回记录
+
+var dnsCache = expirable.NewLRU[string, string](10000, nil, time.Minute*5)
+
+func GetDomainByIP(ip string) (string, bool) {
+	if info, ok := dnsCache.Get(ip); ok {
+		return info, true
+	}
+	return "", false
+}
+func CollectDNSRecords() {
+	// 过滤器：仅入站、来自 53 端口的 UDP 包
+	// !impostor 确保不是我们自己注入的包
+	filter := "inbound and !impostor and udp.SrcPort = 53"
+
+	handle, err := divert.Open(filter, divert.LayerNetwork, divert.PriorityDefault, divert.FlagSniff|divert.FlagRecvOnly)
+	if err != nil {
+		log.Printf("WinDivert open failed: %v", err)
+		return
+	}
+	defer handle.Close()
+
+	inboundBuf := make([]byte, 2048)
+	addr := divert.Address{}
+
+	for {
+		recvLen, err := handle.Recv(inboundBuf, &addr)
+		if err != nil {
+			continue
+		}
+
+		// 1. 定位 DNS Payload 位置
+		ipHeadLen := 20 // 默认 IPv4
+		if inboundBuf[0]>>4 == 6 {
+			ipHeadLen = 40 // IPv6
+		} else {
+			ipHeadLen = int(inboundBuf[0]&0xF) * 4
+		}
+
+		// 8 字节是 UDP Header 长度
+		dnsData := inboundBuf[ipHeadLen+8 : recvLen]
+
+		// 2. 使用 miekg/dns 解码
+		msg := new(dns.Msg)
+		if err := msg.Unpack(dnsData); err != nil {
+			continue
+		}
+
+		// 3. 提取 Answer 记录
+		if msg.Response {
+			for _, answer := range msg.Answer {
+				// 获取域名
+				name := answer.Header().Name
+
+				// 根据记录类型提取 IP
+				switch rr := answer.(type) {
+				case *dns.A:
+					dnsCache.Add(rr.A.String(), name)
+					log.Printf("[DNS A] 域名: %s -> IP: %s", name, rr.A.String())
+					// 这里可以执行你的 GeoIP 分流逻辑
+				case *dns.AAAA:
+					dnsCache.Add(rr.AAAA.String(), name)
+					log.Printf("[DNS AAAA] 域名: %s -> IPv6: %s", name, rr.AAAA.String())
+				}
+			}
+		}
+	}
 }
 
 func CloseWinDivert() {
