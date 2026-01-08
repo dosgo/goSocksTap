@@ -244,7 +244,7 @@ func HackDNSData(tunDns *tunDns.TunDns) {
 	var filterIn = ""
 	filterIn = fmt.Sprintf("!impostor and udp.SrcPort=53")
 
-	inboundDivert, err := divert.Open(filterIn, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
+	inboundDivert, err = divert.Open(filterIn, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
 	if err != nil {
 		log.Printf("winDivert open failed: %v\r\n", err)
 		return
@@ -290,12 +290,12 @@ func NetEvent(pid uint32, tunDns *tunDns.TunDns) {
 	netEventRun = true
 	var filter = fmt.Sprintf("processId=%d or processId=%d and udp", os.Getpid(), pid)
 
-	eventDivert, err := divert.Open(filter, divert.LayerFlow, divert.PriorityDefault, divert.FlagSniff|divert.FlagRecvOnly)
+	eventDivert, err = divert.Open(filter, divert.LayerFlow, divert.PriorityDefault, divert.FlagSniff|divert.FlagRecvOnly)
 	if err != nil {
 		log.Printf("winDivert open failed: %v\r\n", err)
 		return
 	}
-	defer inboundDivert.Close()
+	defer eventDivert.Close()
 	//先清空
 	tunDns.ExcludePorts.Range(func(key, value interface{}) bool {
 		tunDns.ExcludePorts.Delete(key)
@@ -458,6 +458,7 @@ func CollectDNSRecords() {
 
 func CloseWinDivert() {
 	winDivertRun = false
+	netEventRun = false
 	if outboundDivert != nil {
 		outboundDivert.Close()
 	}
@@ -472,7 +473,6 @@ func CloseWinDivert() {
 func CloseNetEvent() {
 	netEventRun = false
 	if eventDivert != nil {
-		eventDivert.Close()
 		eventDivert = nil
 	}
 }
