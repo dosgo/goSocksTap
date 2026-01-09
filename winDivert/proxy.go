@@ -9,86 +9,186 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
+	"sync"
+	"time"
 
 	"github.com/imgk/divert-go"
+	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
-func RedirectData(proxyPort uint16) {
-	// 过滤器：拦截 TCP，排除掉发往 1080 的包以防死循环
-	// 注意：在反射模式下，必须确保过滤器不会拦截代理程序连接真实服务器产生的 Outbound 包
-	filter := fmt.Sprintf(
-		"tcp and ip.SrcAddr != 127.0.0.1 and ip.DstAddr != 127.0.0.1 and "+
-			"tcp.DstPort != %d and tcp.SrcPort != %d",
-		proxyPort, proxyPort,
-	)
+type ForwardInfo1 struct {
+	SrcIP       net.IP
+	SrcPort     uint16
+	OrigDstIP   net.IP
+	OrigDstPort uint16
+}
 
-	fmt.Printf("filter:%s\r\n", filter)
+var natTable sync.Map
 
-	handle, err := divert.Open(filter, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer handle.Close()
+func RedirectTCPNat(proxyPort uint16, proxyAddr string, localHost bool) {
 
-	// 启动 TCP 代理服务器
 	go startProxyServer(proxyPort)
-
-	packet := make([]byte, 65535)
-	var addr divert.Address // 使用你的结构体
-
-	fmt.Println("服务已启动：全端口反射模式 (无 NAT 表)")
-
-	for {
-		// 这里需要根据你使用的绑定库，将底层的 addr 指针传入
-		n, err := handle.Recv(packet, (*divert.Address)(&addr))
-		if err != nil {
-			continue
-		}
-
-		if n < 20 || packet[0]>>4 != 4 {
-			continue
-		}
-
-		ihl := int(packet[0]&0x0F) * 4
-		isOutbound := (addr.Flags & 0x01) != 0
-		log.Printf("收到包长度: %d, Flags 原始值: %d (二进制: %08b)", n, addr.Flags, addr.Flags)
-		//isOutbound := (addr.union[0] & 0x01) != 0
-		if isOutbound {
-			// --- 阶段 A：劫持出站包并弹回本地 ---
-			// 1. 提取原始目标 (DstIP:DstPort)
-			origDstIP := make([]byte, 4)
-			copy(origDstIP, packet[16:20])
-			origDstPort := packet[ihl+2 : ihl+4]
-
-			// 2. 镜像交换：把目标 IP:Port 藏到源地址字段里
-			// 这样代理程序 Accept 时，RemoteAddr 就是真正的目标
-			copy(packet[12:16], origDstIP)       // SrcIP <- Original DstIP
-			copy(packet[ihl:ihl+2], origDstPort) // SrcPort <- Original DstPort
-
-			// 3. 修改目的地为本地代理端口 1080
-			copy(packet[16:20], []byte{127, 0, 0, 1})
-			binary.BigEndian.PutUint16(packet[ihl+2:ihl+4], proxyPort)
-
-			// 4. 方向反转：出站(1) -> 入站(0)
-			addr.Flags &= ^uint8(0x01)
-
-			fmt.Printf("eeeee\r\n")
-
-		} else {
-			// --- 阶段 B：处理入站包 (暂时不需要特殊处理，由协议栈自动路由) ---
-			// 或者是处理来自远程服务器的回包逻辑，streamdump 通过 alt_port 解决
-			// 如果你只做简单反射，这里保持原样转发给协议栈即可
-		}
-
-		divert.CalcChecksums(packet[:n], (*divert.Address)(&addr), 0)
-		handle.Send(packet[:n], (*divert.Address)(&addr))
+	if _, err := os.Stat(divertDll); err != nil {
+		log.Printf("not found :%s\r\n", divertDll)
+		return
 	}
+	winDivertRun = true
+	var forward sync.Map // key: uint16 (local port) -> value: ForwardInfo
+
+	// 出站拦截：拦截所有发往外部的 TCP 包
+	go func() {
+		recvBuf := make([]byte, 65535)
+		addr := divert.Address{}
+
+		// 过滤条件：拦截 TCP 且 目的地址不是代理服务器地址（防止死循环）
+		filterOut := fmt.Sprintf("outbound and tcp and ip.DstAddr != %s and tcp.DstPort != %d", proxyAddr, proxyPort)
+
+		var err error
+		outboundDivert, err = divert.Open(filterOut, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
+		if err != nil {
+			log.Printf("WinDivert outbound open failed: %v\r\n", err)
+			return
+		}
+		defer outboundDivert.Close()
+
+		for winDivertRun {
+			recvLen, err := outboundDivert.Recv(recvBuf, &addr)
+			if err != nil {
+				continue
+			}
+
+			// 1. 解析 IP 层确定 TCP 头部起始位置
+			isIpv6 := recvBuf[0]>>4 == 6
+			var ipHeadLen int
+			var srcIP, dstIP net.IP
+
+			if isIpv6 {
+				ipHeadLen = 40
+				ipHeader, _ := ipv6.ParseHeader(recvBuf[:recvLen])
+				srcIP, dstIP = ipHeader.Src, ipHeader.Dst
+			} else {
+				ipHeadLen = int(recvBuf[0]&0xF) * 4
+				ipHeader, _ := ipv4.ParseHeader(recvBuf[:recvLen])
+				srcIP, dstIP = ipHeader.Src, ipHeader.Dst
+			}
+			fmt.Printf("recvBuf:%+v\r\n", recvBuf[:recvLen])
+			// 2. 解析 TCP 头部 (端口在 TCP 头的前 4 字节)
+			// [0:2] 是 SrcPort, [2:4] 是 DstPort
+			tcpSrcPort := binary.BigEndian.Uint16(recvBuf[ipHeadLen : ipHeadLen+2])
+			// tcpDstPort := binary.BigEndian.Uint16(recvBuf[ipHeadLen+2 : ipHeadLen+4])
+
+			// 3. 记录原始信息，以便回程包还原
+			forward.Store(tcpSrcPort, ForwardInfo{
+				Dst:               dstIP,
+				Src:               srcIP,
+				InterfaceIndex:    addr.Network().InterfaceIndex,
+				SubInterfaceIndex: addr.Network().SubInterfaceIndex,
+				LastTime:          time.Now().Unix(),
+			})
+
+			// 4. 修改目的地址和端口为代理服务器
+			// 修改 IP 层
+			if !isIpv6 {
+				ipHeader, _ := ipv4.ParseHeader(recvBuf[:recvLen])
+				ipHeader.Dst = net.ParseIP(proxyAddr)
+				if localHost {
+					ipHeader.Src = net.ParseIP(proxyAddr)
+				}
+				newIPBuf, _ := ipHeader.Marshal()
+				//fmt.Printf("newIPBuf len:%d recvLen:%d\r\n", len(newIPBuf), recvLen)
+				copy(recvBuf, newIPBuf)
+			}
+			//fmt.Printf("ipHeadLen:%d\r\n", ipHeadLen)
+			// 修改 TCP 层目的端口
+			binary.BigEndian.PutUint16(recvBuf[ipHeadLen+2:ipHeadLen+4], proxyPort)
+			fmt.Printf("recvBuf2:%+v\r\n", recvBuf[:recvLen])
+			// 5. 修正 Loopback 标志（如果是发给本地代理）
+			if localHost {
+				addr.Network().InterfaceIndex = 1
+				addr.Network().SubInterfaceIndex = 0
+				addr.Flags |= 0x04 // WINDIVERT_ADDRESS_FLAG_LOOPBACK
+			}
+
+			// 6. 重新计算校验和并发送
+			divert.CalcChecksums(recvBuf[:recvLen], &addr, 0)
+			outboundDivert.Send(recvBuf[:recvLen], &addr)
+		}
+	}()
+
+	// 入站拦截：拦截代理服务器回传给客户端的包，并伪装成目标服务器
+	go func() {
+		inboundBuf := make([]byte, 65535)
+		inboundAddr := divert.Address{}
+
+		filterIn := fmt.Sprintf("inbound and tcp and tcp.SrcPort == %d and ip.SrcAddr == %s", proxyPort, proxyAddr)
+
+		var err error
+		inboundDivert, err = divert.Open(filterIn, divert.LayerNetwork, divert.PriorityDefault, divert.FlagDefault)
+		if err != nil {
+			log.Printf("WinDivert inbound open failed: %v\r\n", err)
+			return
+		}
+		defer inboundDivert.Close()
+
+		for winDivertRun {
+			recvLen, err := inboundDivert.Recv(inboundBuf, &inboundAddr)
+			if err != nil {
+				continue
+			}
+
+			isIpv6 := inboundBuf[0]>>4 == 6
+			var ipHeadLen int
+			if isIpv6 {
+				ipHeadLen = 40
+			} else {
+				ipHeadLen = int(inboundBuf[0]&0xF) * 4
+			}
+
+			// 获取目的端口，寻找原始对应关系
+			tcpDstPort := binary.BigEndian.Uint16(inboundBuf[ipHeadLen+2 : ipHeadLen+4])
+			val, ok := forward.Load(tcpDstPort)
+			if !ok {
+				inboundDivert.Send(inboundBuf[:recvLen], &inboundAddr)
+				continue
+			}
+			info := val.(ForwardInfo)
+
+			// 还原源地址为原始目标服务器地址
+			if !isIpv6 {
+				ipHeader, _ := ipv4.ParseHeader(inboundBuf[:recvLen])
+				ipHeader.Src = info.Dst
+				if localHost {
+					ipHeader.Dst = info.Src
+				}
+				newIPBuf, _ := ipHeader.Marshal()
+				copy(inboundBuf, newIPBuf)
+			}
+
+			// 还原源端口为原始目标服务器端口 (这里假设是针对特定流量，或者你需要从 info 里额外存原始目标端口)
+			// 注意：在前面的 outbound 里，我们通常需要保存原始目标端口
+			// 假设你之前的拦截是基于端口映射的，这里修改 SrcPort：
+			// binary.BigEndian.PutUint16(inboundBuf[ipHeadLen:ipHeadLen+2], info.OriginalDstPort)
+
+			if localHost {
+				inboundAddr.Network().InterfaceIndex = info.InterfaceIndex
+				inboundAddr.Network().SubInterfaceIndex = info.SubInterfaceIndex
+				inboundAddr.Flags &= ^uint8(0x04) // 清除 Loopback 标志
+			}
+
+			divert.CalcChecksums(inboundBuf[:recvLen], &inboundAddr, 0)
+			inboundDivert.Send(inboundBuf[:recvLen], &inboundAddr)
+		}
+	}()
 }
 
 func startProxyServer(proxyPort uint16) {
 	l, _ := net.Listen("tcp", "127.0.0.1:"+fmt.Sprint(proxyPort))
 	for {
+		fmt.Printf("Accept\r\n")
 		conn, _ := l.Accept()
+		fmt.Printf("eee111\r\n")
 		go func(c net.Conn) {
 			defer c.Close()
 
