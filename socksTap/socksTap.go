@@ -12,9 +12,9 @@ import (
 	"github.com/dosgo/goSocksTap/comm"
 	"github.com/dosgo/goSocksTap/comm/dot"
 	"github.com/dosgo/goSocksTap/comm/netstat"
-	"github.com/dosgo/goSocksTap/comm/socks"
 	"github.com/dosgo/goSocksTap/tunDns"
 	"github.com/dosgo/goSocksTap/winDivert"
+	"golang.org/x/net/proxy"
 
 	"github.com/dosgo/go-tun2socks/core"
 	"github.com/dosgo/go-tun2socks/tun"
@@ -141,21 +141,24 @@ func (fakeDns *SocksTap) tcpForwarder(conn core.CommTCPConn) error {
 	} else {
 		//走代理
 		var remoteAddr = ""
-		var addrType = 0x01
 		remoteAddr = fakeDns.dnsToAddr(srcAddr)
 		if remoteAddr == "" {
 			log.Printf("remoteAddr:%s srcAddr:%s\r\n", remoteAddr, srcAddr)
 			return nil
 		}
-		socksConn, err := net.DialTimeout("tcp", fakeDns.localSocks, time.Second*15)
+		dialer, err := proxy.SOCKS5("tcp", fakeDns.localSocks, nil, proxy.Direct)
 		if err != nil {
-			log.Printf("tcpForwarder err2:%v", err)
-			return nil
+			log.Printf("SOCKS5 拨号失败: %v", err)
+			return err
 		}
-		defer socksConn.Close()
-		if socks.SocksCmd(socksConn, 1, uint8(addrType), remoteAddr, true) == nil {
-			comm.ConnPipe(conn, socksConn, time.Second*120)
+		// ... err check
+		srcConn, err := dialer.Dial("tcp", remoteAddr)
+		if err != nil {
+			log.Printf("SOCKS5 拨号失败: %v", err)
+			return err
 		}
+		defer srcConn.Close()
+		comm.ConnPipe(conn, srcConn, time.Second*120)
 	}
 	return nil
 }

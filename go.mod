@@ -11,6 +11,7 @@ require (
 	github.com/bi-zone/etw v0.0.0-20210519083747-fe9042eb0ea8
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/cilium/ebpf v0.12.3
+	github.com/google/gopacket v1.1.19
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/imgk/divert-go v0.1.0
 	github.com/miekg/dns v1.1.59

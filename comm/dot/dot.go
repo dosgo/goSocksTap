@@ -3,14 +3,14 @@ package dot
 import (
 	"crypto/tls"
 	"errors"
-	"net"
+	"log"
 	"strconv"
 	"time"
 
 	"github.com/dosgo/goSocksTap/comm"
-	"github.com/dosgo/goSocksTap/comm/socks"
 
 	"github.com/miekg/dns"
+	"golang.org/x/net/proxy"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -48,18 +48,13 @@ func (rd *DoT) Connect() error {
 	cfg := &tls.Config{
 		ServerName: rd.ServerName,
 	}
-	srcConn, err := net.DialTimeout("tcp", rd.LSocks, time.Second*15)
+	dialer, err := proxy.SOCKS5("tcp", rd.LSocks, nil, proxy.Direct)
 	if err != nil {
+		log.Printf("SOCKS5 拨号失败: %v", err)
 		return err
 	}
-	if rd.LSocks != "" {
-		if socks.SocksCmd(srcConn, 1, uint8(0x01), rd.Addr, true) != nil {
-			return errors.New("local socks error")
-		}
-	}
-	srcConn.(*net.TCPConn).SetKeepAlive(true)
-	srcConn.(*net.TCPConn).SetKeepAlivePeriod(3 * time.Minute)
-
+	// ... err check
+	srcConn, err := dialer.Dial("tcp", rd.Addr)
 	rd.dnsClientConn = new(dns.Conn)
 	rd.dnsClientConn.Conn = tls.Client(srcConn, cfg)
 	rd.dnsClientConn.UDPSize = 4096
