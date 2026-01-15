@@ -68,9 +68,8 @@ func main() {
 func redirectAllTCP() {
 	// 过滤器逻辑：拦截所有 TCP 流量，但排除：
 	// 1. 代理监听端口 (7080)
-	// 2. 代理程序用于外连的排除 IP (127.0.0.2)
 	filter := fmt.Sprintf(
-		"tcp and tcp.DstPort != %d",
+		"outbound and tcp and tcp.DstPort != %d",
 		proxyPort,
 	)
 
@@ -126,7 +125,7 @@ func redirectAllTCP() {
 
 		if modifiedPacket != nil {
 			// 重新计算校验和并发送
-			divert.CalcChecksums(modifiedPacket, &addr, 0)
+			//divert.CalcChecksums(modifiedPacket, &addr, 0)
 			handle.Send(modifiedPacket, &addr)
 		} else {
 			// 其它包原样放行
