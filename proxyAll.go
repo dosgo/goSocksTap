@@ -49,6 +49,8 @@ func NetEvent(pid uint32) {
 		case divert.EventSocketBind:
 			//	fmt.Printf("ip: %s\r\n", ip.String())
 			myPorts.Store(fmt.Sprintf("%d", addr.Flow().LocalPort), time.Now().Unix())
+		case divert.EventSocketConnect:
+			myPorts.Store(fmt.Sprintf("%d", addr.Flow().LocalPort), time.Now().Unix())
 		case divert.EventSocketClose:
 			//ip := net.IP(addr.Flow().LocalAddress[:4])
 			myPorts.Delete(fmt.Sprintf("%d", addr.Flow().LocalPort))
@@ -83,7 +85,7 @@ func redirectAllTCP() {
 	fmt.Printf("全端口透明代理已启动...\n, 代理端口: %d\n", proxyPort)
 
 	var addr divert.Address
-	buf := make([]byte, 1600)
+	buf := make([]byte, 2048)
 	var modifiedPacket bool
 	for {
 		n, err := handle.Recv(buf, &addr)
