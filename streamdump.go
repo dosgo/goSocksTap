@@ -12,7 +12,7 @@ import (
 	divert "github.com/imgk/divert-go"
 )
 
-var port uint16 = 80
+var port uint16 = 443
 var proxy_port uint16 = 7080
 var alt_port uint16 = 7081
 
