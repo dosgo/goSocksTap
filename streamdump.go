@@ -10,11 +10,13 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	divert "github.com/imgk/divert-go"
+	"golang.org/x/net/proxy"
 )
 
 var port uint16 = 443
 var proxy_port uint16 = 7080
 var alt_port uint16 = 7081
+var useSocks = false
 
 func main() {
 
@@ -26,7 +28,7 @@ func main() {
 
 // 重定向TCP数据包
 func redirectTCPPackets() {
-	filter := fmt.Sprintf("tcp and (tcp.DstPort == %d or tcp.DstPort == %d or tcp.DstPort == %d or tcp.SrcPort == %d or tcp.SrcPort == %d or tcp.SrcPort == %d)",
+	filter := fmt.Sprintf("ip and tcp and (tcp.DstPort == %d or tcp.DstPort == %d or tcp.DstPort == %d or tcp.SrcPort == %d or tcp.SrcPort == %d or tcp.SrcPort == %d)",
 		port, proxy_port, alt_port, port, proxy_port, alt_port)
 	handle, err := divert.Open(
 		filter,
@@ -65,7 +67,7 @@ func redirectTCPPackets() {
 				// addr.Outbound = FALSE;
 				modifiedPacket, err = modifydPacket(packet, dstAddr, srcPort, srcAddr, proxy_port)
 				if err != nil {
-					fmt.Printf("11111\r\n")
+					fmt.Printf("err1:%+v\r\n", err)
 				}
 				addr.Flags = addr.Flags & ^uint8(0x02)
 			} else if srcPort == uint16(proxy_port) {
@@ -77,7 +79,7 @@ func redirectTCPPackets() {
 
 				modifiedPacket, err = modifydPacket(packet, dstAddr, port, srcAddr, dstPort)
 				if err != nil {
-					fmt.Printf("2222\r\n")
+					fmt.Printf("err2:%+v\r\n", err)
 				}
 
 				//addr.Outbound = FALSE;
@@ -88,7 +90,7 @@ func redirectTCPPackets() {
 
 				modifiedPacket, err = modifydPacket(packet, srcAddr, srcPort, dstAddr, port)
 				if err != nil {
-					fmt.Printf("3333\r\n")
+					fmt.Printf("err3:%+v\r\n", err)
 				}
 			}
 		} else {
@@ -98,7 +100,7 @@ func redirectTCPPackets() {
 
 				modifiedPacket, err = modifydPacket(packet, srcAddr, alt_port, dstAddr, dstPort)
 				if err != nil {
-					fmt.Printf("4444\r\n")
+					fmt.Printf("err4:%+v\r\n", err)
 				}
 			}
 		}
@@ -219,7 +221,19 @@ func proxy_connection_handler(conn net.Conn) {
 	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		targetIP := tcpAddr.IP.String()
 		fmt.Printf("targetIP:%s\r\n", targetIP)
-		lConn, err := net.Dial("tcp", net.JoinHostPort(targetIP, strconv.Itoa(int(alt_port))))
+		var lConn net.Conn
+		var err error
+		if useSocks {
+			dialer, err := proxy.SOCKS5("tcp", "127.0.0.1:10808", nil, proxy.Direct)
+			if err != nil {
+				log.Printf("SOCKS5 拨号失败: %v", err)
+				return
+			}
+			// ... err check
+			lConn, err = dialer.Dial("tcp", net.JoinHostPort(targetIP, strconv.Itoa(int(alt_port))))
+		} else {
+			lConn, err = net.Dial("tcp", net.JoinHostPort(targetIP, strconv.Itoa(int(alt_port))))
+		}
 		if err != nil {
 			fmt.Printf("failed to connect socket err:%+v\r\n", err)
 			return
