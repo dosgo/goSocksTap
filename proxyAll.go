@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	divert "github.com/imgk/divert-go"
 )
 
@@ -46,14 +44,16 @@ func NetEvent(pid uint32) {
 			log.Printf("winDivert recv failed: %v\r\n", err)
 			return
 		}
+
 		switch addr.Event() {
 		case divert.EventSocketBind:
+			//	fmt.Printf("ip: %s\r\n", ip.String())
 			myPorts.Store(fmt.Sprintf("%d", addr.Flow().LocalPort), time.Now().Unix())
 		case divert.EventSocketClose:
+			//ip := net.IP(addr.Flow().LocalAddress[:4])
 			myPorts.Delete(fmt.Sprintf("%d", addr.Flow().LocalPort))
 		}
 	}
-
 }
 
 func main() {
@@ -68,6 +68,7 @@ func main() {
 func redirectAllTCP() {
 	// 过滤器逻辑：拦截所有 TCP 流量，但排除：
 	// 1. 代理监听端口 (7080)
+	// 2. 代理程序用于外连的排除 IP (127.0.0.2)
 	filter := fmt.Sprintf(
 		"outbound and tcp and tcp.DstPort != %d",
 		proxyPort,
@@ -83,7 +84,7 @@ func redirectAllTCP() {
 
 	var addr divert.Address
 	buf := make([]byte, 1600)
-
+	var modifiedPacket bool
 	for {
 		n, err := handle.Recv(buf, &addr)
 		if err != nil || n == 0 {
@@ -92,9 +93,8 @@ func redirectAllTCP() {
 
 		packet := buf[:n]
 		outbound := (addr.Flags & (0x01 << 1)) != 0 // 判断是否为出站数据包
-		srcIP, srcPort, dstIP, dstPort := parsePacketInfo(packet)
-
-		var modifiedPacket []byte
+		srcIP, srcPort, dstIP, dstPort := parsePacketInfoFast(packet)
+		modifiedPacket = false
 		if outbound && srcIP != nil {
 			// 场景 A：代理程序发送给客户端的回包 (此时 SrcPort 是 proxyPort)
 			if srcPort == proxyPort {
@@ -102,9 +102,10 @@ func redirectAllTCP() {
 				key := fmt.Sprintf("%d", dstPort)
 				if origPort, ok := originalPorts.Load(key); ok {
 					// 将包伪装成：从“真实服务器”发往“客户端原始端口”
-					modifiedPacket, _ = modifyPacket(packet, dstIP, origPort.(uint16), srcIP, dstPort)
+					modifyPacketFast(packet, dstIP, origPort.(uint16), srcIP, dstPort)
 					// 修改为入站包，欺骗协议栈
 					addr.Flags = addr.Flags & ^uint8(0x02)
+					modifiedPacket = true
 				}
 			} else {
 				//本进程的过滤
@@ -116,17 +117,18 @@ func redirectAllTCP() {
 					originalPorts.Store(key, dstPort)
 					//fmt.Printf("save key:%s->%d\r\n", key, int(dstPort))
 					// 反射逻辑：将目标 IP 改为本地，端口改为代理端口，并设为入站
-					modifiedPacket, _ = modifyPacket(packet, dstIP, srcPort, srcIP, proxyPort)
+					modifyPacketFast(packet, dstIP, srcPort, srcIP, proxyPort)
 					//	fmt.Printf("srcIP:%s -> %s\r\n", dstIP, srcIP)
 					addr.Flags = addr.Flags & ^uint8(0x02)
+					modifiedPacket = true
 				}
 			}
 		}
 
-		if modifiedPacket != nil {
+		if modifiedPacket {
 			// 重新计算校验和并发送
-			//divert.CalcChecksums(modifiedPacket, &addr, 0)
-			handle.Send(modifiedPacket, &addr)
+			divert.CalcChecksums(packet, &addr, 0)
+			handle.Send(packet, &addr)
 		} else {
 			// 其它包原样放行
 			handle.Send(packet, &addr)
@@ -157,7 +159,6 @@ func handleConnection(conn net.Conn) {
 		fmt.Printf("[拦截流量] 目标: %s\n", tcpAddr.String())
 		key := fmt.Sprintf("%d", tcpAddr.Port)
 		if origPort, ok := originalPorts.Load(key); ok {
-			tcpAddr.Port = int(origPort.(uint16))
 			targetConn, err := net.Dial("tcp", net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16)))))
 			if err != nil {
 				log.Printf("无法连接目标服务器: %v", err)
@@ -171,41 +172,48 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-// 工具函数：解析 IP 和端口
-func parsePacketInfo(packet []byte) (net.IP, uint16, net.IP, uint16) {
-	pkt := gopacket.NewPacket(packet, layers.LayerTypeIPv4, gopacket.NoCopy)
-	if ipLayer := pkt.Layer(layers.LayerTypeIPv4); ipLayer != nil {
-		ip := ipLayer.(*layers.IPv4)
-		if tcpLayer := pkt.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-			tcp := tcpLayer.(*layers.TCP)
-			return ip.SrcIP, uint16(tcp.SrcPort), ip.DstIP, uint16(tcp.DstPort)
-		}
+func parsePacketInfoFast(packet []byte) (net.IP, uint16, net.IP, uint16) {
+	// 1. 基础长度检查
+	if len(packet) < 20 {
+		return nil, 0, nil, 0
 	}
-	return nil, 0, nil, 0
+
+	// 2. 检查是否为 IPv4
+	if (packet[0] >> 4) != 4 {
+		return nil, 0, nil, 0
+	}
+
+	// 3. 重要：拷贝 IP 字节，防止后续修改 packet 时影响变量值
+	srcIP := make(net.IP, 4)
+	dstIP := make(net.IP, 4)
+	copy(srcIP, packet[12:16])
+	copy(dstIP, packet[16:20])
+
+	// 4. 动态计算 TCP 偏移量
+	ihl := int(packet[0]&0x0F) * 4
+
+	// 5. 再次安全检查：确保 packet 长度足够读取 TCP 端口 (ihl + 4 字节)
+	if len(packet) < ihl+4 {
+		return nil, 0, nil, 0
+	}
+
+	srcPort := uint16(packet[ihl])<<8 | uint16(packet[ihl+1])
+	dstPort := uint16(packet[ihl+2])<<8 | uint16(packet[ihl+3])
+
+	return srcIP, srcPort, dstIP, dstPort
 }
 
-// 工具函数：构造并序列化新数据包
-func modifyPacket(packet []byte, newSrcIP net.IP, newSrcPort uint16, newDstIP net.IP, newDstPort uint16) ([]byte, error) {
-	pkt := gopacket.NewPacket(packet, layers.LayerTypeIPv4, gopacket.Default)
-	ip, _ := pkt.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
-	tcp, _ := pkt.Layer(layers.LayerTypeTCP).(*layers.TCP)
-	//fmt.Printf("newSrcIP:%+v\r\n", newSrcIP)
+func modifyPacketFast(packet []byte, newSrcIP net.IP, newSrcPort uint16, newDstIP net.IP, newDstPort uint16) {
+	// 1. 修改 IP (IPv4 头部固定 12-19 字节)
+	copy(packet[12:16], newSrcIP.To4())
+	copy(packet[16:20], newDstIP.To4())
 
-	ip.SrcIP, tcp.SrcPort = newSrcIP, layers.TCPPort(newSrcPort)
-	ip.DstIP, tcp.DstPort = newDstIP, layers.TCPPort(newDstPort)
+	// 2. 动态计算 TCP 偏移量 (IHL)
+	ihl := int(packet[0]&0x0F) * 4
 
-	// 重置校验和
-	ip.Checksum, tcp.Checksum = 0, 0
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
-	tcp.SetNetworkLayerForChecksum(ip)
-
-	payload := []byte{}
-	if app := pkt.ApplicationLayer(); app != nil {
-		payload = app.Payload()
-	}
-
-	err := gopacket.SerializeLayers(buf, opts, ip, tcp, gopacket.Payload(payload))
-	return buf.Bytes(), err
+	// 3. 修改端口 (基于 ihl 偏移)
+	packet[ihl] = uint8(newSrcPort >> 8)
+	packet[ihl+1] = uint8(newSrcPort)
+	packet[ihl+2] = uint8(newDstPort >> 8)
+	packet[ihl+3] = uint8(newDstPort)
 }
