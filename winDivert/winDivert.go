@@ -333,7 +333,7 @@ func NetEventRecords() {
 	netEventRun = true
 	var filter = fmt.Sprintf("!loopback")
 
-	eventDivert, err := divert.Open(filter, divert.LayerFlow, divert.PriorityDefault, divert.FlagSniff|divert.FlagRecvOnly)
+	eventDivert, err := divert.Open(filter, divert.LayerSocket, divert.PriorityDefault, divert.FlagSniff|divert.FlagRecvOnly)
 	if err != nil {
 		log.Printf("winDivert open failed: %v\r\n", err)
 		return
@@ -365,11 +365,11 @@ func NetEventRecords() {
 		}
 
 		switch addr.Event() {
-		case divert.EventFlowEstablished:
+		case divert.EventSocketBind:
 			//tunDns.ExcludePorts.Store(addr.Flow().LocalPort, time.Now().Unix())
 			addrRecords.Add(remoteIP.String(), true)
 			fmt.Printf("add addr %s %d  rddr:%s rport:%d pid:%d\r\n", localIP.String(), addr.Flow().LocalPort, remoteIP.String(), addr.Flow().RemotePort, flow.ProcessID)
-		case divert.EventFlowDeleted:
+		case divert.EventSocketClose:
 			addrRecords.Remove(remoteIP.String())
 			//fmt.Printf("remote addr %s %d \r\n", localIP.String(), addr.Flow().LocalPort)
 			//tunDns.ExcludePorts.Delete(addr.Flow().LocalPort)
