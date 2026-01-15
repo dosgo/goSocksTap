@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"time"
 
 	divert "github.com/imgk/divert-go"
 )
@@ -48,9 +47,9 @@ func NetEvent(pid uint32) {
 		switch addr.Event() {
 		case divert.EventSocketBind:
 			//	fmt.Printf("ip: %s\r\n", ip.String())
-			myPorts.Store(fmt.Sprintf("%d", addr.Flow().LocalPort), time.Now().Unix())
+			myPorts.Store(fmt.Sprintf("%d", addr.Flow().LocalPort), 1)
 		case divert.EventSocketConnect:
-			myPorts.Store(fmt.Sprintf("%d", addr.Flow().LocalPort), time.Now().Unix())
+			myPorts.Store(fmt.Sprintf("%d", addr.Flow().LocalPort), 1)
 		case divert.EventSocketClose:
 			//ip := net.IP(addr.Flow().LocalAddress[:4])
 			myPorts.Delete(fmt.Sprintf("%d", addr.Flow().LocalPort))
@@ -85,7 +84,7 @@ func redirectAllTCP() {
 	fmt.Printf("全端口透明代理已启动...\n, 代理端口: %d\n", proxyPort)
 
 	var addr divert.Address
-	buf := make([]byte, 2048)
+	buf := make([]byte, 1024*10)
 	var modifiedPacket bool
 	for {
 		n, err := handle.Recv(buf, &addr)
