@@ -5,8 +5,6 @@ package winDivert
 
 import (
 	"sync"
-
-	"github.com/dosgo/goSocksTap/tunDns"
 )
 
 /*only windows*/
@@ -27,9 +25,7 @@ func CloseWinDivert() {
 func NetEvent(pid int, myPorts *sync.Map) {
 
 }
-func HackDNSData(tunDns *tunDns.TunDns) {
 
-}
 func CloseNetEvent() {
 
 }
