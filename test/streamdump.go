@@ -234,7 +234,7 @@ func proxy_connection_handler(conn net.Conn) {
 		} else {
 			lConn, err = net.Dial("tcp", net.JoinHostPort(targetIP, strconv.Itoa(int(alt_port))))
 		}
-		if err != nil {
+		if err != nil || lConn == nil {
 			fmt.Printf("failed to connect socket err:%+v\r\n", err)
 			return
 		}
