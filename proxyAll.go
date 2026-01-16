@@ -17,7 +17,7 @@ import (
 
 // 配置参数
 var (
-	socksAddr        = "127.0.0.1:10808"
+	socksAddr        = ""
 	proxyPort uint16 = 7080
 	// 记录 原始客户端端口映射
 	// Key: {服务器IP, 客户端IP, 代理端口}, Value: 客户端原始端口
@@ -177,8 +177,8 @@ func handleConnection(conn net.Conn) {
 			} else {
 				targetConn, err = net.DialTimeout("tcp", net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16)))), 5*time.Second)
 			}
-			if err != nil {
-				log.Printf("无法连接目标服务器: %v", err)
+			if err != nil || targetConn == nil {
+				log.Printf("connect err: %v", err)
 				return
 			}
 			defer myPorts.Delete(fmt.Sprintf("%d", targetConn.LocalAddr().(*net.TCPAddr).Port))
