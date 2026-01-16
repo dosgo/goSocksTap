@@ -16,7 +16,7 @@ import (
 var port uint16 = 443
 var proxy_port uint16 = 7080
 var alt_port uint16 = 7081
-var useSocks = false
+var socksAddr = "127.0.0.1:10808"
 
 func main() {
 
@@ -223,8 +223,8 @@ func proxy_connection_handler(conn net.Conn) {
 		fmt.Printf("targetIP:%s\r\n", targetIP)
 		var lConn net.Conn
 		var err error
-		if useSocks {
-			dialer, err := proxy.SOCKS5("tcp", "127.0.0.1:10808", nil, proxy.Direct)
+		if socksAddr != "" {
+			dialer, err := proxy.SOCKS5("tcp", socksAddr, nil, proxy.Direct)
 			if err != nil {
 				log.Printf("SOCKS5 拨号失败: %v", err)
 				return

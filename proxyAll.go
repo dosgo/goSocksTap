@@ -12,15 +12,13 @@ import (
 	"time"
 
 	divert "github.com/imgk/divert-go"
+	"golang.org/x/net/proxy"
 )
 
 // 配置参数
 var (
+	socksAddr        = "127.0.0.1:10808"
 	proxyPort uint16 = 7080
-	// 排除 IP：代理程序在“连接目标”时强制绑定此 IP，用于绕过驱动拦截
-)
-
-var (
 	// 记录 原始客户端端口映射
 	// Key: {服务器IP, 客户端IP, 代理端口}, Value: 客户端原始端口
 	originalPorts = sync.Map{}
@@ -157,15 +155,29 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		// 核心点：由于使用了反射，conn.RemoteAddr() 实际上是原始的目标服务器地址
-		fmt.Printf("[拦截流量] 目标: %s\n", tcpAddr.String())
+		//	fmt.Printf("[拦截流量] 目标: %s\n", tcpAddr.String())
 		key := fmt.Sprintf("%d", tcpAddr.Port)
 		if origPort, ok := originalPorts.Load(key); ok {
-			dialer := getDialer()
-			if dialer == nil {
-				return
+			/*
+				dialer := getDialer()
+				if dialer == nil {
+					return
+				}
+				defer myPorts.Delete(fmt.Sprintf("%d", dialer.LocalAddr.(*net.TCPAddr).Port))
+			*/
+			var targetConn net.Conn
+			var err error
+			if socksAddr != "" {
+				dialer, err := proxy.SOCKS5("tcp", socksAddr, nil, proxy.Direct)
+				if err != nil {
+					log.Printf("SOCKS5 拨号失败: %v", err)
+					return
+				}
+				// ... err check
+				targetConn, err = dialer.Dial("tcp", net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16)))))
+			} else {
+				targetConn, err = net.DialTimeout("tcp", net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16)))), 5*time.Second)
 			}
-			defer myPorts.Delete(fmt.Sprintf("%d", dialer.LocalAddr.(*net.TCPAddr).Port))
-			targetConn, err := dialer.Dial("tcp", net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16)))))
 			if err != nil {
 				log.Printf("无法连接目标服务器: %v", err)
 				return
