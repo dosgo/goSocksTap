@@ -163,7 +163,6 @@ func handleConnection(conn net.Conn) {
 				if dialer == nil {
 					return
 				}
-				defer myPorts.Delete(fmt.Sprintf("%d", dialer.LocalAddr.(*net.TCPAddr).Port))
 			*/
 			var targetConn net.Conn
 			var err error
@@ -182,6 +181,7 @@ func handleConnection(conn net.Conn) {
 				log.Printf("无法连接目标服务器: %v", err)
 				return
 			}
+			defer myPorts.Delete(fmt.Sprintf("%d", targetConn.LocalAddr().(*net.TCPAddr).Port))
 			//fmt.Printf("src port:%d\r\n", targetConn.LocalAddr().(*net.TCPAddr).Port)
 			defer targetConn.Close()
 			// 双向数据拷贝 (你可以在这里打印/记录 payload 内容)
