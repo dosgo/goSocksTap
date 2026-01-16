@@ -72,7 +72,7 @@ func redirectAllTCP() {
 	// 1. 代理监听端口 (7080)
 	// 2. 代理程序用于外连的排除 IP (127.0.0.2)
 	filter := fmt.Sprintf(
-		"outbound and tcp and tcp.DstPort != %d",
+		"!loopback and outbound and tcp and tcp.DstPort != %d",
 		proxyPort,
 	)
 
