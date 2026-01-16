@@ -70,3 +70,19 @@ func GetUdpBindList(pid int, slefPid bool) ([]uint16, error) {
 	}
 	return ports, nil
 }
+
+func GetTcpBindList(pid int, slefPid bool) ([]uint16, error) {
+	tbl, err := netstat.GetTCPTable2(true)
+	if err != nil {
+		return nil, errors.New("error")
+	}
+	var _slefPid = os.Getpid()
+	var ports []uint16
+	s := tbl.Rows()
+	for i := range s {
+		if int(s[i].WinPid) == pid || int(s[i].WinPid) == _slefPid {
+			ports = append(ports, s[i].LocalSock().Port)
+		}
+	}
+	return ports, nil
+}

@@ -78,6 +78,10 @@ func IsChinaMainlandIP(IP string) bool {
 }
 
 func downloadIPTable(name string) error {
+	//
+	// 假设你从公开资源下载了这些文件
+	//https://raw.githubusercontent.com/gaoyifan/china-operator-ip/refs/heads/ip-lists/china6.txt
+	//https://raw.githubusercontent.com/gaoyifan/china-operator-ip/refs/heads/ip-lists/china4.txt
 	uri := "https://raw.githubusercontent.com/17mon/china_ip_list/master/china_ip_list.txt"
 	resp, err := http.Get(uri)
 	if err != nil {
