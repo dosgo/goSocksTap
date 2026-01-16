@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	divert "github.com/imgk/divert-go"
 )
@@ -111,7 +112,6 @@ func redirectAllTCP() {
 			} else {
 				//本进程的过滤
 				if _, ok := myPorts.Load(fmt.Sprintf("%d", srcPort)); !ok {
-					fmt.Printf("to src port:%d\r\n", srcPort)
 					// 场景 B：客户端发起的原始请求包 (访问任意端口)
 					// 记录原始端口信息，以便后续回包还原
 					key := fmt.Sprintf("%d", srcPort)
@@ -160,18 +160,56 @@ func handleConnection(conn net.Conn) {
 		fmt.Printf("[拦截流量] 目标: %s\n", tcpAddr.String())
 		key := fmt.Sprintf("%d", tcpAddr.Port)
 		if origPort, ok := originalPorts.Load(key); ok {
-			targetConn, err := net.Dial("tcp", net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16)))))
+			dialer := getDialer()
+			if dialer == nil {
+				return
+			}
+			defer myPorts.Delete(fmt.Sprintf("%d", dialer.LocalAddr.(*net.TCPAddr).Port))
+			targetConn, err := dialer.Dial("tcp", net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16)))))
 			if err != nil {
 				log.Printf("无法连接目标服务器: %v", err)
 				return
 			}
-			fmt.Printf("src port:%d\r\n", targetConn.LocalAddr().(*net.TCPAddr).Port)
+			//fmt.Printf("src port:%d\r\n", targetConn.LocalAddr().(*net.TCPAddr).Port)
 			defer targetConn.Close()
 			// 双向数据拷贝 (你可以在这里打印/记录 payload 内容)
 			go io.Copy(targetConn, conn)
 			io.Copy(conn, targetConn)
+		} else {
+			fmt.Printf("err addr:%s\r\n", tcpAddr.String())
 		}
 	}
+}
+
+func getDialer() *net.Dialer {
+	randomPort, err := GetRandomPort()
+	if err != nil {
+		fmt.Printf("获取随机端口失败: %v\n", err)
+		return nil
+	}
+	myPorts.Store(fmt.Sprintf("%d", randomPort), 1)
+	// 使用 Dialer 绑定到这个随机端口
+	return &net.Dialer{
+		Timeout: 5 * time.Second,
+		LocalAddr: &net.TCPAddr{
+			Port: randomPort, // 使用随机端口
+		},
+	}
+}
+func GetRandomPort() (int, error) {
+	// 监听任意地址的0端口，系统会分配随机端口
+	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+
+	listener, err := net.ListenTCP("tcp", addr)
+	if err != nil {
+		return 0, err
+	}
+	defer listener.Close()
+
+	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
 func parsePacketInfoFast(packet []byte) (net.IP, uint16, net.IP, uint16) {
