@@ -1,126 +1,8 @@
 package comm
 
 import (
-	"log"
-	"sync"
-
-	"golang.org/x/time/rate"
-
-	"io"
 	"net"
-	"strconv"
-	"strings"
-	"time"
 )
-
-type UdpLimit struct {
-	Limit   *rate.Limiter
-	Expired int64
-}
-
-type CommConn interface {
-	SetReadDeadline(t time.Time) error
-	SetWriteDeadline(t time.Time) error
-	io.ReadWriteCloser
-}
-
-type TimeoutConn struct {
-	Conn    CommConn
-	TimeOut time.Duration
-}
-
-func (conn TimeoutConn) Read(buf []byte) (int, error) {
-	conn.Conn.SetReadDeadline(time.Now().Add(conn.TimeOut))
-	return conn.Conn.Read(buf)
-}
-
-func (conn TimeoutConn) Write(buf []byte) (int, error) {
-	conn.Conn.SetWriteDeadline(time.Now().Add(conn.TimeOut))
-	return conn.Conn.Write(buf)
-}
-
-/*tcp swap*/
-func ConnPipe(src CommConn, dst CommConn, duration time.Duration) {
-	defer src.Close()
-	defer dst.Close()
-	srcT := TimeoutConn{src, duration}
-	dstT := TimeoutConn{dst, duration}
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		_, err := io.Copy(srcT, dstT)
-		if err != nil {
-			return
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		_, err := io.Copy(dstT, srcT)
-		if err != nil {
-			return
-		}
-	}()
-
-	// 等待所有 goroutines 完成
-	wg.Wait()
-}
-
-/*
-get Unused B
-return tunaddr tungw
-*/
-func GetUnusedTunAddr() (string, string) {
-	laddrs, err := GetNetworkInfo()
-	if err != nil {
-		return "", ""
-	}
-	var laddrInfo = ""
-	for _, _laddr := range laddrs {
-		laddrInfo = laddrInfo + "net:" + _laddr.IpAddress
-	}
-	//tunAddr string,tunMask string,tunGW
-	for i := 19; i < 254; i++ {
-		if strings.Index(laddrInfo, "net:172."+strconv.Itoa(i)) == -1 {
-			return "172." + strconv.Itoa(i) + ".0.2", "172." + strconv.Itoa(i) + ".0.1"
-		}
-	}
-	return "", ""
-}
-
-func GetNetworkInfo() ([]lAddr, error) {
-	intf, err := net.Interfaces()
-	lAddrs := []lAddr{}
-	if err != nil {
-		log.Fatal("get network info failed: %v", err)
-		return nil, err
-	}
-	for _, v := range intf {
-		ips, err := v.Addrs()
-		if err != nil {
-			log.Fatal("get network addr failed: %v", err)
-			return nil, err
-		}
-		//此处过滤loopback（本地回环）和isatap（isatap隧道）
-		if !strings.Contains(v.Name, "Loopback") && !strings.Contains(v.Name, "isatap") {
-			itemAddr := lAddr{}
-			itemAddr.Name = v.Name
-			itemAddr.MACAddress = v.HardwareAddr.String()
-			for _, ip := range ips {
-				if strings.Contains(ip.String(), ".") {
-					_, ipNet, err1 := net.ParseCIDR(ip.String())
-					if err1 == nil {
-						itemAddr.IpAddress = ipNet.IP.String()
-						itemAddr.IpMask = net.IP(ipNet.Mask).String()
-					}
-				}
-			}
-			lAddrs = append(lAddrs, itemAddr)
-		}
-	}
-	return lAddrs, nil
-}
 
 func IsPublicIP(ip net.IP) bool {
 	if ip.IsLoopback() || ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast() {
@@ -132,43 +14,48 @@ func IsPublicIP(ip net.IP) bool {
 	return false
 }
 
-func AddRoute(tunAddr string, tunGw string, tunMask string) error {
-	var netNat = make([]string, 4)
-	//masks:=strings.Split(tunMask,".")
-	masks := net.ParseIP(tunMask).To4()
-	Addrs := strings.Split(tunAddr, ".")
-	for i := 0; i <= 3; i++ {
-		if masks[i] == 255 {
-			netNat[i] = Addrs[i]
-		} else {
-			netNat[i] = "0"
-		}
-	}
-	maskAddr := net.IPNet{IP: net.ParseIP(tunAddr), Mask: net.IPv4Mask(masks[0], masks[1], masks[2], masks[3])}
-	maskAddrs := strings.Split(maskAddr.String(), "/")
-	lAdds, err := GetLocalAddresses()
-	var iName = ""
-	if err == nil {
-		for _, v := range lAdds {
-			if strings.Index(v.IpAddress, tunAddr) != -1 {
-				iName = v.Name
-				break
-			}
-		}
+func ParsePacketInfoFast(packet []byte) (net.IP, uint16, net.IP, uint16) {
+	// 1. 基础长度检查
+	if len(packet) < 20 {
+		return nil, 0, nil, 0
 	}
 
-	//clear old
-	CmdHide("route", "delete", strings.Join(netNat, ".")).Output()
-	cmd := CmdHide("netsh", "interface", "ipv4", "add", "route", strings.Join(netNat, ".")+"/"+maskAddrs[1], iName, tunGw, "metric=6", "store=active")
-	cmd.Run()
-	CmdHide("ipconfig", "/flushdns").Run()
-	return nil
+	// 2. 检查是否为 IPv4
+	if (packet[0] >> 4) != 4 {
+		return nil, 0, nil, 0
+	}
+
+	// 3. 重要：拷贝 IP 字节，防止后续修改 packet 时影响变量值
+	srcIP := make(net.IP, 4)
+	dstIP := make(net.IP, 4)
+	copy(srcIP, packet[12:16])
+	copy(dstIP, packet[16:20])
+
+	// 4. 动态计算 TCP 偏移量
+	ihl := int(packet[0]&0x0F) * 4
+
+	// 5. 再次安全检查：确保 packet 长度足够读取 TCP 端口 (ihl + 4 字节)
+	if len(packet) < ihl+4 {
+		return nil, 0, nil, 0
+	}
+
+	srcPort := uint16(packet[ihl])<<8 | uint16(packet[ihl+1])
+	dstPort := uint16(packet[ihl+2])<<8 | uint16(packet[ihl+3])
+
+	return srcIP, srcPort, dstIP, dstPort
 }
 
-type lAddr struct {
-	Name       string
-	IpAddress  string
-	IpMask     string
-	GateWay    string
-	MACAddress string
+func ModifyPacketFast(packet []byte, newSrcIP net.IP, newSrcPort uint16, newDstIP net.IP, newDstPort uint16) {
+	// 1. 修改 IP (IPv4 头部固定 12-19 字节)
+	copy(packet[12:16], newSrcIP.To4())
+	copy(packet[16:20], newDstIP.To4())
+
+	// 2. 动态计算 TCP 偏移量 (IHL)
+	ihl := int(packet[0]&0x0F) * 4
+
+	// 3. 修改端口 (基于 ihl 偏移)
+	packet[ihl] = uint8(newSrcPort >> 8)
+	packet[ihl+1] = uint8(newSrcPort)
+	packet[ihl+2] = uint8(newDstPort >> 8)
+	packet[ihl+3] = uint8(newDstPort)
 }
