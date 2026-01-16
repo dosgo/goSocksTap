@@ -230,7 +230,7 @@ func proxy_connection_handler(conn net.Conn) {
 				return
 			}
 			// ... err check
-			lConn, err = dialer.Dial("tcp", net.JoinHostPort(targetIP, strconv.Itoa(int(alt_port))))
+			lConn, err = dialer.Dial("tcp", net.JoinHostPort(targetIP, strconv.Itoa(int(port))))
 		} else {
 			lConn, err = net.Dial("tcp", net.JoinHostPort(targetIP, strconv.Itoa(int(alt_port))))
 		}

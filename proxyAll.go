@@ -111,7 +111,7 @@ func redirectAllTCP() {
 			} else {
 				//本进程的过滤
 				if _, ok := myPorts.Load(fmt.Sprintf("%d", srcPort)); !ok {
-
+					fmt.Printf("to src port:%d\r\n", srcPort)
 					// 场景 B：客户端发起的原始请求包 (访问任意端口)
 					// 记录原始端口信息，以便后续回包还原
 					key := fmt.Sprintf("%d", srcPort)
@@ -165,6 +165,7 @@ func handleConnection(conn net.Conn) {
 				log.Printf("无法连接目标服务器: %v", err)
 				return
 			}
+			fmt.Printf("src port:%d\r\n", targetConn.LocalAddr().(*net.TCPAddr).Port)
 			defer targetConn.Close()
 			// 双向数据拷贝 (你可以在这里打印/记录 payload 内容)
 			go io.Copy(targetConn, conn)
