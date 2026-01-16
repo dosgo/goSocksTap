@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -99,12 +100,16 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 			*/
 			var targetConn net.Conn
 			var err error
-			if socksTap.localSocks != "" && socksTap.dialer != nil && comm.IsChinaMainlandIP(tcpAddr.IP.String()) {
+			if socksTap.localSocks != "" && socksTap.dialer != nil && !comm.IsChinaMainlandIP(tcpAddr.IP.String()) {
 				domain, ok := socksTap.dnsRecords.Get(tcpAddr.IP.String())
+				remoteAddr := net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16))))
 				if ok {
 					fmt.Printf("domain: %s\r\n", domain)
+
+					remoteAddr = net.JoinHostPort(strings.TrimSuffix(domain, "."), strconv.Itoa(int(origPort.(uint16))))
+
 				}
-				targetConn, err = socksTap.dialer.Dial("tcp", net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16)))))
+				targetConn, err = socksTap.dialer.Dial("tcp", remoteAddr)
 			} else {
 				targetConn, err = net.DialTimeout("tcp", net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16)))), 5*time.Second)
 			}
