@@ -105,9 +105,7 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 				remoteAddr := net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16))))
 				if ok {
 					fmt.Printf("domain: %s\r\n", domain)
-
 					remoteAddr = net.JoinHostPort(strings.TrimSuffix(domain, "."), strconv.Itoa(int(origPort.(uint16))))
-
 				}
 				targetConn, err = socksTap.dialer.Dial("tcp", remoteAddr)
 			} else {
