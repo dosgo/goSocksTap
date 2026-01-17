@@ -100,12 +100,14 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 			*/
 			var targetConn net.Conn
 			var err error
-			if socksTap.localSocks != "" && socksTap.dialer != nil && !comm.IsChinaMainlandIP(tcpAddr.IP.String()) {
+			if socksTap.localSocks != "" && socksTap.dialer != nil && comm.IsProxyRequiredFast(tcpAddr.IP.String()) {
 				domain, ok := socksTap.dnsRecords.Get(tcpAddr.IP.String())
 				remoteAddr := net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16))))
 				if ok {
-					log.Printf("domain: %s\r\n", domain)
+					//log.Printf("domain: %s\r\n", domain)
 					remoteAddr = net.JoinHostPort(strings.TrimSuffix(domain, "."), strconv.Itoa(int(origPort.(uint16))))
+				} else {
+					fmt.Printf("no domain remoteAddr:%s\r\n", remoteAddr)
 				}
 				targetConn, err = socksTap.dialer.Dial("tcp", remoteAddr)
 			} else {

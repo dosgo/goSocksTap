@@ -2,6 +2,9 @@ package comm
 
 import (
 	"net"
+	"time"
+
+	"github.com/hashicorp/golang-lru/v2/expirable"
 )
 
 func IsPublicIP(ip net.IP) bool {
@@ -58,4 +61,21 @@ func ModifyPacketFast(packet []byte, newSrcIP net.IP, newSrcPort uint16, newDstI
 	packet[ihl+1] = uint8(newSrcPort)
 	packet[ihl+2] = uint8(newDstPort >> 8)
 	packet[ihl+3] = uint8(newDstPort)
+}
+
+var geoCache = expirable.NewLRU[string, bool](10000, nil, time.Minute*15)
+
+func IsProxyRequiredFast(ipStr string) bool {
+	// 1. 检查缓存 (Fast Path)
+	if isChina, ok := geoCache.Get(ipStr); ok {
+		return !isChina // 如果是中国 IP，则不需要代理
+	}
+
+	// 2. 执行真正的查询 (Slow Path)
+	isChina := IsChinaMainlandIP(ipStr)
+
+	// 3. 写入缓存
+	geoCache.Add(ipStr, isChina)
+
+	return !isChina
 }

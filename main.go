@@ -13,7 +13,7 @@ func main() {
 	var udpProxy = false
 	flag.BoolVar(&udpProxy, "udpProxy", true, "use udpProxy ")
 	flag.Parse()
-	var _socksTap = socksTap.NewSocksTap(1080, sock5Addr, false)
+	var _socksTap = socksTap.NewSocksTap(1080, sock5Addr, true)
 	log.Printf("sock5Addr:%s\r\n", sock5Addr)
 	log.Printf("udpProxy:%v\r\n", udpProxy)
 	_socksTap.Start()

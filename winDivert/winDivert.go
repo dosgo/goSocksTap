@@ -165,16 +165,19 @@ func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 			} else {
 				//本进程的过滤
 				if _, ok := excludePorts.Load(fmt.Sprintf("%d", srcPort)); !ok {
-					// 场景 B：客户端发起的原始请求包 (访问任意端口)
-					// 记录原始端口信息，以便后续回包还原
-					key := fmt.Sprintf("%d", srcPort)
-					originalPorts.Store(key, dstPort)
-					//log.Printf("save key:%s->%d\r\n", key, int(dstPort))
-					// 反射逻辑：将目标 IP 改为本地，端口改为代理端口，并设为入站
-					comm.ModifyPacketFast(packet, dstIP, srcPort, srcIP, proxyPort)
-					//	log.Printf("srcIP:%s -> %s\r\n", dstIP, srcIP)
-					addr.Flags = addr.Flags & ^uint8(0x02)
-					modifiedPacket = true
+
+					if comm.IsProxyRequiredFast(dstIP.String()) {
+						// 场景 B：客户端发起的原始请求包 (访问任意端口)
+						// 记录原始端口信息，以便后续回包还原
+						key := fmt.Sprintf("%d", srcPort)
+						originalPorts.Store(key, dstPort)
+						//log.Printf("save key:%s->%d\r\n", key, int(dstPort))
+						// 反射逻辑：将目标 IP 改为本地，端口改为代理端口，并设为入站
+						comm.ModifyPacketFast(packet, dstIP, srcPort, srcIP, proxyPort)
+						//	log.Printf("srcIP:%s -> %s\r\n", dstIP, srcIP)
+						addr.Flags = addr.Flags & ^uint8(0x02)
+						modifiedPacket = true
+					}
 				}
 			}
 		}

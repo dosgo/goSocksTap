@@ -54,14 +54,15 @@ func loadLookupTable(name string) cidranger.Ranger {
 	return ranger
 }
 
+var fraudIps = map[string]uint8{
+	"182.43.124.6":   1,
+	"124.236.16.201": 1,
+	"223.75.236.241": 1,
+	"39.102.194.95":  1,
+}
+
 func IsChinaMainlandIP(IP string) bool {
 	//anti-fraud ip
-	var fraudIps = map[string]uint8{
-		"182.43.124.6":   1,
-		"124.236.16.201": 1,
-		"223.75.236.241": 1,
-		"39.102.194.95":  1,
-	}
 	if _, ok := fraudIps[IP]; ok {
 		return false
 	}
