@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/dosgo/goSocksTap/comm"
+	"github.com/dosgo/goSocksTap/comm/netstat"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/imgk/divert-go"
 	"github.com/miekg/dns"
@@ -90,6 +91,14 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 }
 
 func NetEvent(pid int, excludePorts *sync.Map) {
+	excludePorts.Clear()
+	if pid > 0 {
+		bindPorts, _ := netstat.GetTcpBindList(pid, true)
+		for _, v := range bindPorts {
+			excludePorts.Store(fmt.Sprintf("%d", v), 1)
+		}
+	}
+
 	var filter = fmt.Sprintf("processId=%d or processId=%d", os.Getpid(), pid)
 	var err error
 	eventDivert, err = divert.Open(filter, divert.LayerSocket, divert.PriorityDefault, divert.FlagSniff|divert.FlagRecvOnly)
@@ -200,6 +209,12 @@ func CloseWinDivert() {
 	if tcpDivert != nil {
 		tcpDivert.Close()
 	}
+	if eventDivert != nil {
+		eventDivert.Close()
+	}
+}
+
+func CloseNetEvent() {
 	if eventDivert != nil {
 		eventDivert.Close()
 	}

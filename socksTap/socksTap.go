@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,11 +18,13 @@ import (
 )
 
 type SocksTap struct {
-	proxyPort  uint16
-	localSocks string
-	bypass     bool
-	dialer     proxy.Dialer
-	dnsRecords *expirable.LRU[string, string]
+	proxyPort      uint16
+	localSocks     string
+	bypass         bool
+	dialer         proxy.Dialer
+	dnsRecords     *expirable.LRU[string, string]
+	run            bool
+	socksServerPid int
 }
 
 // 配置参数
@@ -39,9 +42,10 @@ func NewSocksTap(proxyPort uint16, localSocks string, bypass bool) *SocksTap {
 }
 
 func (socksTap *SocksTap) Start() {
-	var socksServerPid = 0
+	socksTap.run = true
+
 	if socksTap.localSocks != "" {
-		socksServerPid, _ = netstat.PortGetPid(socksTap.localSocks)
+		socksTap.socksServerPid, _ = netstat.PortGetPid(socksTap.localSocks)
 		socksTap.dnsRecords = expirable.NewLRU[string, string](10000, nil, time.Minute*5)
 		go winDivert.CollectDNSRecords(socksTap.dnsRecords)
 	}
@@ -51,21 +55,31 @@ func (socksTap *SocksTap) Start() {
 		log.Printf("SOCKS5 拨号失败: %v", err)
 		return
 	}
+	go socksTap.task()
 	// 1. 启动本地代理中转服务器
 	go socksTap.startLocalRelay()
-	//之前连接的端口也要绑定
-	if socksServerPid > 0 {
-		bindPorts, _ := netstat.GetTcpBindList(socksServerPid, true)
-		for _, v := range bindPorts {
-			excludePorts.Store(fmt.Sprintf("%d", v), 1)
-		}
-	}
-	go winDivert.NetEvent(socksServerPid, &excludePorts)
+	go winDivert.NetEvent(socksTap.socksServerPid, &excludePorts)
 	// 2. 开启 WinDivert 拦截并重定向所有 TCP 流量
 	go winDivert.RedirectAllTCP(socksTap.proxyPort, &excludePorts, &originalPorts)
 }
 func (socksTap *SocksTap) Close() {
+	socksTap.run = false
 	winDivert.CloseWinDivert()
+}
+
+func (socksTap *SocksTap) task() {
+	for socksTap.run {
+		if runtime.GOOS == "windows" {
+			pid, err := netstat.PortGetPid(socksTap.localSocks)
+			if err == nil && pid > 0 && pid != socksTap.socksServerPid {
+				socksTap.socksServerPid = pid
+				winDivert.CloseNetEvent()
+				time.Sleep(time.Second * 1)
+				go winDivert.NetEvent(socksTap.socksServerPid, &excludePorts)
+			}
+		}
+		time.Sleep(time.Second * 30)
+	}
 }
 
 // 代理中转逻辑
