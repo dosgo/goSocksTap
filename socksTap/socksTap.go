@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dosgo/goSocksTap/comm"
 	"github.com/dosgo/goSocksTap/comm/netstat"
 	"github.com/dosgo/goSocksTap/winDivert"
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -100,7 +99,7 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 			*/
 			var targetConn net.Conn
 			var err error
-			if socksTap.localSocks != "" && socksTap.dialer != nil && comm.IsProxyRequiredFast(tcpAddr.IP.String()) {
+			if socksTap.localSocks != "" && socksTap.dialer != nil {
 				domain, ok := socksTap.dnsRecords.Get(tcpAddr.IP.String())
 				remoteAddr := net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16))))
 				if ok {
