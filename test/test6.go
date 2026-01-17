@@ -2,8 +2,8 @@ package main
 
 import (
 	"crypto/tls"
-	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 )
@@ -17,7 +17,7 @@ func main() {
 	client := &http.Client{Transport: tr}
 	resp, err := client.Get("https://github.com/dosgo/castX")
 	if err != nil {
-		fmt.Printf("err:%+v\r\n", err)
+		log.Printf("err:%+v\r\n", err)
 		return
 	}
 	io.Copy(os.Stdout, resp.Body)

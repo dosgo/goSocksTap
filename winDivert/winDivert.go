@@ -109,7 +109,7 @@ func NetEvent(pid int, excludePorts *sync.Map) {
 		}
 		switch addr.Event() {
 		case divert.EventSocketBind:
-			//	fmt.Printf("ip: %s\r\n", ip.String())
+			//	log.Printf("ip: %s\r\n", ip.String())
 			excludePorts.Store(fmt.Sprintf("%d", addr.Flow().LocalPort), 1)
 		case divert.EventSocketConnect:
 			excludePorts.Store(fmt.Sprintf("%d", addr.Flow().LocalPort), 1)
@@ -135,7 +135,7 @@ func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 	}
 	defer tcpDivert.Close()
 
-	fmt.Printf("全端口透明代理已启动...\n, 代理端口: %d\n", proxyPort)
+	log.Printf("全端口透明代理已启动...\n, 代理端口: %d\n", proxyPort)
 
 	var addr divert.Address
 	buf := make([]byte, 1024*10)
@@ -169,10 +169,10 @@ func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 					// 记录原始端口信息，以便后续回包还原
 					key := fmt.Sprintf("%d", srcPort)
 					originalPorts.Store(key, dstPort)
-					//fmt.Printf("save key:%s->%d\r\n", key, int(dstPort))
+					//log.Printf("save key:%s->%d\r\n", key, int(dstPort))
 					// 反射逻辑：将目标 IP 改为本地，端口改为代理端口，并设为入站
 					comm.ModifyPacketFast(packet, dstIP, srcPort, srcIP, proxyPort)
-					//	fmt.Printf("srcIP:%s -> %s\r\n", dstIP, srcIP)
+					//	log.Printf("srcIP:%s -> %s\r\n", dstIP, srcIP)
 					addr.Flags = addr.Flags & ^uint8(0x02)
 					modifiedPacket = true
 				}

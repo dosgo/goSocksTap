@@ -40,7 +40,7 @@ func redirectTCPPackets() {
 		log.Fatalf("Network层打开失败: %v", err)
 	}
 	defer handle.Close()
-	fmt.Println("开始重定向数据包...")
+	log.Println("开始重定向数据包...")
 	var addr divert.Address
 	buf := make([]byte, 2048)
 	var modifiedPacket []byte
@@ -67,7 +67,7 @@ func redirectTCPPackets() {
 				// addr.Outbound = FALSE;
 				modifiedPacket, err = modifydPacket(packet, dstAddr, srcPort, srcAddr, proxy_port)
 				if err != nil {
-					fmt.Printf("err1:%+v\r\n", err)
+					log.Printf("err1:%+v\r\n", err)
 				}
 				addr.Flags = addr.Flags & ^uint8(0x02)
 			} else if srcPort == uint16(proxy_port) {
@@ -79,7 +79,7 @@ func redirectTCPPackets() {
 
 				modifiedPacket, err = modifydPacket(packet, dstAddr, port, srcAddr, dstPort)
 				if err != nil {
-					fmt.Printf("err2:%+v\r\n", err)
+					log.Printf("err2:%+v\r\n", err)
 				}
 
 				//addr.Outbound = FALSE;
@@ -90,7 +90,7 @@ func redirectTCPPackets() {
 
 				modifiedPacket, err = modifydPacket(packet, srcAddr, srcPort, dstAddr, port)
 				if err != nil {
-					fmt.Printf("err3:%+v\r\n", err)
+					log.Printf("err3:%+v\r\n", err)
 				}
 			}
 		} else {
@@ -100,7 +100,7 @@ func redirectTCPPackets() {
 
 				modifiedPacket, err = modifydPacket(packet, srcAddr, alt_port, dstAddr, dstPort)
 				if err != nil {
-					fmt.Printf("err4:%+v\r\n", err)
+					log.Printf("err4:%+v\r\n", err)
 				}
 			}
 		}
@@ -109,7 +109,7 @@ func redirectTCPPackets() {
 			// 发送修改后的包
 			//	divert.CalcChecksums(modifiedPacket, &addr, 0)
 
-			//fmt.Printf("src packet:%+v modifiedPacket:%+v\r\n", packet, modifiedPacket)
+			//log.Printf("src packet:%+v modifiedPacket:%+v\r\n", packet, modifiedPacket)
 			if _, err := handle.Send(modifiedPacket, &addr); err != nil {
 				log.Printf("发送数据包失败: %v", err)
 			}
@@ -220,7 +220,7 @@ func proxy_connection_handler(conn net.Conn) {
 	defer conn.Close()
 	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		targetIP := tcpAddr.IP.String()
-		fmt.Printf("targetIP:%s\r\n", targetIP)
+		log.Printf("targetIP:%s\r\n", targetIP)
 		var lConn net.Conn
 		var err error
 		if socksAddr != "" {
@@ -235,14 +235,14 @@ func proxy_connection_handler(conn net.Conn) {
 			lConn, err = net.Dial("tcp", net.JoinHostPort(targetIP, strconv.Itoa(int(alt_port))))
 		}
 		if err != nil || lConn == nil {
-			fmt.Printf("failed to connect socket err:%+v\r\n", err)
+			log.Printf("failed to connect socket err:%+v\r\n", err)
 			return
 		}
 		defer lConn.Close()
 		go io.Copy(conn, lConn)
 		io.Copy(lConn, conn)
 	} else {
-		fmt.Printf("failed to get tcpAddr\r\n")
+		log.Printf("failed to get tcpAddr\r\n")
 	}
 	return
 }

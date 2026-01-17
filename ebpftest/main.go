@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"log"
 	"os"
 	"time"
@@ -35,12 +34,12 @@ func main() {
 
 	err = netlink.QdiscReplace(qdisc)
 	if err != nil {
-		fmt.Printf("could not get replace qdisc: %w", err)
+		log.Printf("could not get replace qdisc: %w", err)
 		return
 	}
 
 	prog := coll.Programs["egress_prog_func"]
-	fmt.Printf("fd:%d\r\n", prog.FD())
+	log.Printf("fd:%d\r\n", prog.FD())
 
 	filter1 := &netlink.BpfFilter{
 		FilterAttrs: netlink.FilterAttrs{
@@ -56,7 +55,7 @@ func main() {
 		DirectAction: true,
 	}
 
-	fmt.Printf("eth0.Attrs().Index:%+v %+v\r\n", filter1, eth0.Attrs().Index)
+	log.Printf("eth0.Attrs().Index:%+v %+v\r\n", filter1, eth0.Attrs().Index)
 	// 3. 附加到 TC
 	if err := netlink.FilterReplace(filter1); err != nil {
 		panic(err)
@@ -70,17 +69,17 @@ func main() {
 		if coll.Variables["egress_pkt_count"] != nil {
 			var egress_pkt_count uint64
 			if err := coll.Variables["egress_pkt_count"].Get(&egress_pkt_count); err != nil {
-				fmt.Printf("ddd err\r\n")
+				log.Printf("ddd err\r\n")
 			}
 			var ingress_pkt_count uint64
 			if err := coll.Variables["ingress_pkt_count"].Get(&ingress_pkt_count); err != nil {
-				fmt.Printf("ddd err\r\n")
+				log.Printf("ddd err\r\n")
 			}
 			log.Printf("Packet Count: %d %d\n", egress_pkt_count, ingress_pkt_count)
 		}
 	}
 
-	fmt.Print("请输入回车继续...")
+	log.Print("请输入回车继续...")
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		if scanner.Text() == "" {

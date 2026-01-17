@@ -75,7 +75,7 @@ func (socksTap *SocksTap) startLocalRelay() {
 	if err != nil {
 		log.Fatalf("代理监听失败: %v", err)
 	}
-	fmt.Printf("startLocalRelay\r\n")
+	log.Printf("startLocalRelay\r\n")
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -89,7 +89,7 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		// 核心点：由于使用了反射，conn.RemoteAddr() 实际上是原始的目标服务器地址
-		//	fmt.Printf("[拦截流量] 目标: %s\n", tcpAddr.String())
+		//	log.Printf("[拦截流量] 目标: %s\n", tcpAddr.String())
 		key := fmt.Sprintf("%d", tcpAddr.Port)
 		if origPort, ok := originalPorts.Load(key); ok {
 			/*
@@ -104,7 +104,7 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 				domain, ok := socksTap.dnsRecords.Get(tcpAddr.IP.String())
 				remoteAddr := net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16))))
 				if ok {
-					fmt.Printf("domain: %s\r\n", domain)
+					log.Printf("domain: %s\r\n", domain)
 					remoteAddr = net.JoinHostPort(strings.TrimSuffix(domain, "."), strconv.Itoa(int(origPort.(uint16))))
 				}
 				targetConn, err = socksTap.dialer.Dial("tcp", remoteAddr)
@@ -116,13 +116,13 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 				return
 			}
 			defer excludePorts.Delete(fmt.Sprintf("%d", targetConn.LocalAddr().(*net.TCPAddr).Port))
-			//fmt.Printf("src port:%d\r\n", targetConn.LocalAddr().(*net.TCPAddr).Port)
+			//log.Printf("src port:%d\r\n", targetConn.LocalAddr().(*net.TCPAddr).Port)
 			defer targetConn.Close()
 			// 双向数据拷贝 (你可以在这里打印/记录 payload 内容)
 			go io.Copy(targetConn, conn)
 			io.Copy(conn, targetConn)
 		} else {
-			fmt.Printf("err addr:%s\r\n", tcpAddr.String())
+			log.Printf("err addr:%s\r\n", tcpAddr.String())
 		}
 	}
 }
@@ -130,7 +130,7 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 func getDialer() *net.Dialer {
 	randomPort, err := GetRandomPort()
 	if err != nil {
-		fmt.Printf("获取随机端口失败: %v\n", err)
+		log.Printf("获取随机端口失败: %v\n", err)
 		return nil
 	}
 	excludePorts.Store(fmt.Sprintf("%d", randomPort), 1)

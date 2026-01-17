@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-	"fmt"
+	"log"
 
 	"github.com/dosgo/goSocksTap/socksTap"
 )
@@ -14,8 +14,8 @@ func main() {
 	flag.BoolVar(&udpProxy, "udpProxy", true, "use udpProxy ")
 	flag.Parse()
 	var _socksTap = socksTap.NewSocksTap(1080, sock5Addr, false)
-	fmt.Printf("sock5Addr:%s\r\n", sock5Addr)
-	fmt.Printf("udpProxy:%v\r\n", udpProxy)
+	log.Printf("sock5Addr:%s\r\n", sock5Addr)
+	log.Printf("udpProxy:%v\r\n", udpProxy)
 	_socksTap.Start()
 	select {}
 }

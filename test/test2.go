@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log"
 
 	"github.com/dosgo/goSocksTap/comm"
 )
@@ -15,6 +15,6 @@ func main() {
 	testIPs := []string{"114.114.114.114", "8.8.8.8", "240e:e1:8100:28::2"}
 	for _, ipStr := range testIPs {
 		isChina := comm.IsChinaMainlandIP(ipStr)
-		fmt.Printf("IP: %-20s 是否中国: %v\n", ipStr, isChina)
+		log.Printf("IP: %-20s 是否中国: %v\n", ipStr, isChina)
 	}
 }
