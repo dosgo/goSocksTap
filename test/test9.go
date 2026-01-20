@@ -136,6 +136,17 @@ func getOriginalDst(conn net.Conn) (string, error) {
 }
 
 func setupNftables(setName string, proxyPort uint16, mark int) {
+
+	/*
+		sudo nft delete table ip my_transparent_proxy
+		sudo nft add table ip my_transparent_proxy
+		sudo nft 'add set ip my_transparent_proxy test { type ipv4_addr; flags interval,timeout; }'
+		sudo nft 'add element ip my_transparent_proxy test { 0.0.0.0/0 timeout 1m }'
+		sudo nft 'add chain ip my_transparent_proxy OUTPUT { type nat hook output priority -150; }'
+		sudo nft 'insert rule ip my_transparent_proxy OUTPUT meta mark 0x1a accept'
+		sudo nft 'add rule ip my_transparent_proxy OUTPUT ip daddr @test tcp dport 1-65535 redirect to :7080'
+	*/
+
 	c := &nftables.Conn{}
 	// 1. 创建或清空表 (ip nat)
 	table := c.AddTable(&nftables.Table{
@@ -205,35 +216,41 @@ func setupNftables(setName string, proxyPort uint16, mark int) {
 	if err := c.Flush(); err != nil {
 		log.Fatalf("提交 nftables 规则失败: %v", err)
 	}
-
-	fmt.Println("nftables 规则已加载，启动心跳协程...")
+	//先手工添加一次
+	addNetworkSet(c, set)
 	// 5. 开启心跳：每 5 秒给 0.0.0.0/0 续期 10 秒
 	go func() {
-		// 构造 0.0.0.0/0 元素
-		element := []nftables.SetElement{
-			{
-				Key:         net.IPv4(0, 0, 0, 0).To4(),
-				IntervalEnd: false,
-				Timeout:     15 * time.Second,
-			},
-			{
-				Key:         net.IPv4(255, 255, 255, 255).To4(),
-				IntervalEnd: true,
-			},
-		}
-
-		for {
-			// 向集合添加/更新元素
-			if err := c.SetAddElements(set, element); err != nil {
-				log.Printf("续期失败: %v", err)
-			}
-			_ = c.Flush() // 必须 Flush 才会生效
-			time.Sleep(7 * time.Second)
+		ticker := time.NewTicker(7 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			addNetworkSet(c, set)
 		}
 	}()
 }
 
+/*添加网段到集合*/
+func addNetworkSet(c *nftables.Conn, set *nftables.Set) error {
+	//sudo nft 'add element ip my_transparent_proxy test { 0.0.0.0/0 timeout 1m }'
+	element := []nftables.SetElement{
+		{
+			Key:         net.IPv4(0, 0, 0, 0).To4(),
+			IntervalEnd: false,
+			Timeout:     15 * time.Second,
+		},
+		{
+			Key:         net.IPv4(255, 255, 255, 255).To4(),
+			IntervalEnd: true,
+		},
+	}
+	c.FlushSet(set)
+	if err := c.SetAddElements(set, element); err != nil {
+		log.Printf("续期失败: %v", err)
+	}
+	return c.Flush() // 必须 Flush 才会生效
+}
+
 func cleanupNftables() {
+	//sudo nft delete table ip my_transparent_proxy
 	c := &nftables.Conn{}
 	// 1. 创建或清空表 (ip nat)
 	table := c.AddTable(&nftables.Table{
