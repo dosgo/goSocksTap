@@ -211,6 +211,28 @@ func setupNftables(setName string, proxyPort uint16, mark int) {
 		},
 	})
 
+	c.AddRule(&nftables.Rule{
+		Table: table,
+		Chain: chain,
+		Exprs: []expr.Any{
+			// 提取目的 IP 地址 (PayloadBaseNetworkHeader Offset 16 是 IPv4 daddr)
+			&expr.Payload{
+				DestRegister: 1,
+				Base:         expr.PayloadBaseNetworkHeader,
+				Offset:       16,
+				Len:          4,
+			},
+			// 判断是否等于 127.0.0.1 (注意：IP地址在包中是大端序)
+			&expr.Cmp{
+				Op:       expr.CmpOpEq,
+				Register: 1,
+				Data:     []byte{127, 0, 0, 1},
+			},
+			// 如果匹配，直接 Accept（放行，不再往下走 redirect 规则）
+			&expr.Verdict{Kind: expr.VerdictAccept},
+		},
+	})
+
 	// 4. 添加规则：meta skmark != 0x1A && ip daddr @proxy_active_set redirect to :7080
 	portBytes := make([]byte, 2)
 	binary.BigEndian.PutUint16(portBytes, proxyPort) // 端口也必须大端
