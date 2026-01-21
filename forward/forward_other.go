@@ -1,138 +1,110 @@
-package main
+//go:build !windows
+// +build !windows
+
+package forward
 
 import (
 	"encoding/binary"
-	"fmt"
-	"io"
 	"log"
 	"net"
-	"os"
-	"os/exec"
-	"os/signal"
-	"syscall"
+	"sync"
 	"time"
 
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
 	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"golang.org/x/sys/unix"
 )
 
-var (
-	proxyPort int = 7080
-	// 存储映射关系：源端口 -> 原始目标地址
-	mark int = 0x1A
-)
-
-func main() {
-	// 1. 设置 iptables 规则 (只拦截 TCP，排除本进程)
-	// 建议通过当前用户 UID 过滤，防止死循环
-
-	// 规则：将所有出站 TCP 流量（除了本用户发出的）导向 NFQUEUE 0
-	//	setupIptables(mark, proxyPort)
-	//defer cleanupIptables(mark, proxyPort)
-	cleanupNftables()
-	setupNftables("test", uint16(proxyPort), mark)
-	// 2. 启动本地监听服务器 (透明代理逻辑)
-	go startLocalRelay()
-
-	// 阻塞直到接收退出信号
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	log.Printf("Linux 透明代理已启动 ...")
-	<-sigChan
-}
-
-// startLocalRelay 处理被重定向到 7080 的连接
-func startLocalRelay() {
-	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", proxyPort))
+func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
+	// 1. 打开网络设备进行嗅探
+	// "eth0" 替换为你实际的网卡名，或者用 "any" 监听所有网卡
+	handle, err := pcap.OpenLive("any", 1600, true, pcap.BlockForever)
 	if err != nil {
-		log.Fatalf("Listen failed: %v", err)
+		log.Fatalf("无法打开网卡: %v", err)
 	}
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
+	defer handle.Close()
+
+	// 2. 设置 BPF 过滤器
+	// 仅入站 (需结合网卡方向)、来自 53 端口的 UDP
+	// 注意：libpcap 的 inbound 过滤器取决于驱动支持，通常直接用 src port 53 即可
+	filter := "udp and src port 53"
+	if err := handle.SetBPFFilter(filter); err != nil {
+		log.Fatalf("设置过滤器失败: %v", err)
+	}
+
+	// 3. 开始解析
+	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	for packet := range packetSource.Packets() {
+		// 尝试解析 DNS 层
+		dnsLayer := packet.Layer(layers.LayerTypeDNS)
+		if dnsLayer == nil {
 			continue
 		}
-		go func(c net.Conn) {
-			defer c.Close()
 
-			targetStr, err := getOriginalDst(c.(*net.TCPConn))
-			fmt.Println(targetStr)
-			// 连接真正的目标
-			targetConn, err := dialer.Dial("tcp", targetStr)
-			if err != nil {
-				return
-			}
-			defer targetConn.Close()
+		dnsMsg := dnsLayer.(*layers.DNS)
 
-			// 双向转发
-			go func() { _, _ = io.Copy(targetConn, c) }()
-			_, _ = io.Copy(c, targetConn)
-		}(conn)
-	}
-}
-
-var dialer = &net.Dialer{
-	Timeout: 5 * time.Second,
-	Control: func(network, address string, c syscall.RawConn) error {
-		return c.Control(func(fd uintptr) {
-			// 给代理发出的包打上 0x1A 标记，避免被 iptables 再次拦截
-			err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, mark)
-			if err != nil {
-				log.Printf("设置 SO_MARK 失败: %v", err)
-			}
-		})
-	},
-}
-
-// Iptables 管理逻辑
-func setupIptables(mark int, proxyPort int) {
-	// 1. 在 nat 表中，将非标记流量重定向到代理端口
-	cmd := fmt.Sprintf("iptables -t nat -A OUTPUT -p tcp -m mark ! --mark 0x%x -j REDIRECT --to-ports %d", mark, proxyPort)
-	fmt.Printf("cmd:%s\r\n", cmd)
-	runCmd(cmd)
-}
-func cleanupIptables(mark int, qNum int) {
-	log.Println("正在清理 iptables 规则...")
-	cmd := fmt.Sprintf("iptables -t nat -D OUTPUT -p tcp -m mark ! --mark 0x%x -j REDIRECT --to-ports %d", mark, proxyPort)
-	runCmd(cmd)
-}
-
-func runCmd(s string) {
-	_ = exec.Command("sh", "-c", s).Run()
-}
-
-func getOriginalDst(conn net.Conn) (string, error) {
-	tcpConn := conn.(*net.TCPConn)
-	raw, err := tcpConn.SyscallConn()
-	if err != nil {
-		return "", err
-	}
-
-	var addr string
-	var controlErr error
-	err = raw.Control(func(fd uintptr) {
-		// 获取 REDIRECT 之前的原始目的地
-		originalAddr, err := unix.GetsockoptIPv6Mreq(int(fd), unix.IPPROTO_IP, unix.SO_ORIGINAL_DST) // 80 = SO_ORIGINAL_DST
-		if err != nil {
-			controlErr = err
-			return
+		// 检查是否是响应包
+		if !dnsMsg.QR {
+			continue
 		}
-		// 解析 originalAddr 得到 IP 和端口...
-		ip := net.IPv4(
-			originalAddr.Multiaddr[4],
-			originalAddr.Multiaddr[5],
-			originalAddr.Multiaddr[6],
-			originalAddr.Multiaddr[7],
-		)
-		port := binary.BigEndian.Uint16(originalAddr.Multiaddr[2:4])
-		addr = fmt.Sprintf("%s:%d", ip.String(), port)
-	})
 
-	if controlErr != nil {
-		return "", controlErr
+		for _, answer := range dnsMsg.Answers {
+			name := string(answer.Name)
+
+			// 提取 A 记录 (IPv4)
+			if answer.Type == layers.DNSTypeA {
+				ip := answer.IP.String()
+				dnsRecords.Add(ip, name)
+				log.Printf("[DNS A] %s -> %s", name, ip)
+			}
+			// 提取 AAAA 记录 (IPv6)
+			if answer.Type == layers.DNSTypeAAAA {
+				//ip := answer.IP.String()
+				// dnsRecords.Add(ip, name)
+			}
+		}
 	}
-	return addr, err
+}
+
+func NetEvent(pid int, excludePorts *sync.Map) {
+
+}
+
+var mark int = 0x1aa
+
+func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map) {
+	cleanupNftables()
+	setupNftables("matchNet", uint16(proxyPort), mark)
+}
+
+func CloseNetEvent() {
+
+}
+
+func CloseWinDivert() {
+	cleanupNftables()
+}
+func GetMark() int {
+	return mark
+}
+func SetMark(_mark int) {
+	mark = mark
+}
+
+func cleanupNftables() {
+	//sudo nft delete table ip my_transparent_proxy
+	c := &nftables.Conn{}
+	// 1. 创建或清空表 (ip nat)
+	table := c.AddTable(&nftables.Table{
+		Family: nftables.TableFamilyIPv4,
+		Name:   "my_transparent_proxy",
+	})
+	c.DelTable(table)
+	c.Flush()
 }
 
 func setupNftables(setName string, proxyPort uint16, mark int) {
@@ -145,6 +117,10 @@ func setupNftables(setName string, proxyPort uint16, mark int) {
 		sudo nft 'add chain ip my_transparent_proxy OUTPUT { type nat hook output priority -150; }'
 		sudo nft 'insert rule ip my_transparent_proxy OUTPUT meta mark 0x1a accept'
 		sudo nft 'add rule ip my_transparent_proxy OUTPUT ip daddr @test tcp dport 1-65535 redirect to :7080'
+	*/
+
+	/*
+		ct state established   socket exists
 	*/
 
 	c := &nftables.Conn{}
@@ -265,16 +241,4 @@ func addNetworkSet(c *nftables.Conn, set *nftables.Set) error {
 		log.Printf("续期失败: %v", err)
 	}
 	return c.Flush() // 必须 Flush 才会生效
-}
-
-func cleanupNftables() {
-	//sudo nft delete table ip my_transparent_proxy
-	c := &nftables.Conn{}
-	// 1. 创建或清空表 (ip nat)
-	table := c.AddTable(&nftables.Table{
-		Family: nftables.TableFamilyIPv4,
-		Name:   "my_transparent_proxy",
-	})
-	c.DelTable(table)
-	c.Flush()
 }
