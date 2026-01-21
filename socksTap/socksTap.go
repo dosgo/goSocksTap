@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dosgo/goSocksTap/comm"
 	"github.com/dosgo/goSocksTap/comm/netstat"
 	"github.com/dosgo/goSocksTap/winDivert"
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -20,7 +21,7 @@ import (
 type SocksTap struct {
 	proxyPort      uint16
 	localSocks     string
-	bypass         bool
+	mode           int //0全局代理 1绕过局域网和中国大陆地址代理
 	dialer         proxy.Dialer
 	dnsRecords     *expirable.LRU[string, string]
 	run            bool
@@ -33,11 +34,12 @@ var (
 	originalPorts = sync.Map{}
 )
 
-func NewSocksTap(proxyPort uint16, localSocks string, bypass bool) *SocksTap {
+func NewSocksTap(proxyPort uint16, localSocks string, mode int) *SocksTap {
+	comm.SetProxyMode(mode)
 	return &SocksTap{
 		proxyPort:  proxyPort,
 		localSocks: localSocks,
-		bypass:     bypass,
+		mode:       mode,
 	}
 }
 
@@ -69,7 +71,7 @@ func (socksTap *SocksTap) Close() {
 
 func (socksTap *SocksTap) task() {
 	for socksTap.run {
-		if runtime.GOOS == "windows" {
+		if runtime.GOOS == "windows" && socksTap.localSocks != "" {
 			pid, err := netstat.PortGetPid(socksTap.localSocks)
 			if err == nil && pid > 0 && pid != socksTap.socksServerPid {
 				socksTap.socksServerPid = pid
@@ -105,12 +107,6 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 		//	log.Printf("[拦截流量] 目标: %s\n", tcpAddr.String())
 		key := fmt.Sprintf("%d", tcpAddr.Port)
 		if origPort, ok := originalPorts.Load(key); ok {
-			/*
-				dialer := getDialer()
-				if dialer == nil {
-					return
-				}
-			*/
 			var targetConn net.Conn
 			var err error
 			if socksTap.localSocks != "" && socksTap.dialer != nil {
@@ -140,35 +136,4 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 			log.Printf("err addr:%s\r\n", tcpAddr.String())
 		}
 	}
-}
-
-func getDialer() *net.Dialer {
-	randomPort, err := GetRandomPort()
-	if err != nil {
-		log.Printf("获取随机端口失败: %v\n", err)
-		return nil
-	}
-	excludePorts.Store(fmt.Sprintf("%d", randomPort), 1)
-	// 使用 Dialer 绑定到这个随机端口
-	return &net.Dialer{
-		Timeout: 5 * time.Second,
-		LocalAddr: &net.TCPAddr{
-			Port: randomPort, // 使用随机端口
-		},
-	}
-}
-func GetRandomPort() (int, error) {
-	// 监听任意地址的0端口，系统会分配随机端口
-	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-
-	listener, err := net.ListenTCP("tcp", addr)
-	if err != nil {
-		return 0, err
-	}
-	defer listener.Close()
-
-	return listener.Addr().(*net.TCPAddr).Port, nil
 }

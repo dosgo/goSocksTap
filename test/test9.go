@@ -190,6 +190,24 @@ func setupNftables(setName string, proxyPort uint16, mark int) {
 		},
 	})
 
+	c.AddRule(&nftables.Rule{
+		Table: table,
+		Chain: chain,
+		Exprs: []expr.Any{
+			&expr.Ct{Key: expr.CtKeySTATE, Register: 1},
+			// 匹配 ESTABLISHED (2) 和 RELATED (4) 状态
+			&expr.Bitwise{
+				SourceRegister: 1,
+				DestRegister:   1,
+				Len:            4,
+				Mask:           []byte{0x06, 0, 0, 0},
+				Xor:            []byte{0, 0, 0, 0},
+			},
+			&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: []byte{0, 0, 0, 0}},
+			&expr.Verdict{Kind: expr.VerdictAccept}, // 发现是老连接，直接放行
+		},
+	})
+
 	// 4. 添加规则：meta skmark != 0x1A && ip daddr @proxy_active_set redirect to :7080
 	portBytes := make([]byte, 2)
 	binary.BigEndian.PutUint16(portBytes, proxyPort) // 端口也必须大端

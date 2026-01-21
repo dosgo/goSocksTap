@@ -64,8 +64,16 @@ func ModifyPacketFast(packet []byte, newSrcIP net.IP, newSrcPort uint16, newDstI
 }
 
 var geoCache = expirable.NewLRU[string, bool](10000, nil, time.Minute*15)
+var proxyMode = 0
 
+func SetProxyMode(mode int) {
+	proxyMode = mode
+}
 func IsProxyRequiredFast(ipStr string) bool {
+	//如果是全局代理lian,则全部代理
+	if proxyMode == 0 {
+		return true
+	}
 	// 1. 检查缓存 (Fast Path)
 	if isChina, ok := geoCache.Get(ipStr); ok {
 		return !isChina // 如果是中国 IP，则不需要代理
