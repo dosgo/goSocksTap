@@ -5,7 +5,6 @@ package forward
 
 import (
 	"encoding/binary"
-	"fmt"
 	"log"
 	"net"
 	"sync"
@@ -20,9 +19,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func Htons(i uint16) uint16 {
+	return (i<<8)&0xff00 | i>>8
+}
 func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 	// 1. 创建 Raw Socket (ETH_P_ALL = 0x0300)
-	fd, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, 0x0300)
+	//fd, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, 0x0300)
+
+	// 使用 ETH_P_ALL (0x0003) 的转换结果
+	fd, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(Htons(0x0003)))
 	if err != nil {
 		log.Fatalf("创建 Socket 失败: %v", err)
 	}
@@ -86,7 +91,7 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 			if answer.Type == layers.DNSTypeA {
 				ip := answer.IP.String()
 				dnsRecords.Add(ip, name)
-				fmt.Printf("捕获成功: %s -> %s\n", name, ip)
+				//fmt.Printf("捕获成功: %s -> %s\n", name, ip)
 			}
 		}
 	}
