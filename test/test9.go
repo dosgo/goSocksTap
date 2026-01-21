@@ -145,6 +145,8 @@ func setupNftables(setName string, proxyPort uint16, mark int) {
 		sudo nft 'add chain ip my_transparent_proxy OUTPUT { type nat hook output priority -150; }'
 		sudo nft 'insert rule ip my_transparent_proxy OUTPUT meta mark 0x1a accept'
 		sudo nft 'add rule ip my_transparent_proxy OUTPUT ip daddr @test tcp dport 1-65535 redirect to :7080'
+		sudo nft add rule ip my_table my_chain ct state established,related accept
+
 	*/
 
 	c := &nftables.Conn{}

@@ -32,10 +32,11 @@ func (socksTap *SocksTap) handleConnection(c net.Conn) {
 	addrs := strings.Split(targetStr, ":")
 	isExclude := false
 	if socksTap.socksServerPid != 0 {
-		_pid, _, _ := getProcessBySrcPort(socksTap.socksServerPid)
+		_pid, _, _ := getProcessBySrcPort(c.RemoteAddr().(*net.TCPAddr).Port)
 		if _pid == socksTap.socksServerPid {
 			isExclude = true
 		}
+
 	}
 	if socksTap.localSocks != "" && socksTap.dialer != nil && comm.IsProxyRequiredFast(addrs[0]) && !isExclude {
 		domain, ok := socksTap.dnsRecords.Get(addrs[0])
@@ -47,7 +48,6 @@ func (socksTap *SocksTap) handleConnection(c net.Conn) {
 		}
 		targetConn, err = socksTap.dialer.Dial("tcp", targetStr)
 	} else {
-		fmt.Printf("targetStr:%s\r\n", targetStr)
 		targetConn, err = dialer.Dial("tcp", targetStr)
 	}
 	if err != nil {

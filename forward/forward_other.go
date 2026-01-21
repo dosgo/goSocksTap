@@ -5,14 +5,15 @@ package forward
 
 import (
 	"encoding/binary"
+	"fmt"
 	"log"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -20,51 +21,72 @@ import (
 )
 
 func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
-	// 1. 打开网络设备进行嗅探
-	// "eth0" 替换为你实际的网卡名，或者用 "any" 监听所有网卡
-	handle, err := pcap.OpenLive("any", 1600, true, pcap.BlockForever)
+	// 1. 创建 Raw Socket (ETH_P_ALL = 0x0300)
+	fd, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, 0x0300)
 	if err != nil {
-		log.Fatalf("无法打开网卡: %v", err)
+		log.Fatalf("创建 Socket 失败: %v", err)
 	}
-	defer handle.Close()
+	defer syscall.Close(fd)
 
-	// 2. 设置 BPF 过滤器
-	// 仅入站 (需结合网卡方向)、来自 53 端口的 UDP
-	// 注意：libpcap 的 inbound 过滤器取决于驱动支持，通常直接用 src port 53 即可
-	filter := "udp and src port 53"
-	if err := handle.SetBPFFilter(filter); err != nil {
-		log.Fatalf("设置过滤器失败: %v", err)
-	}
+	log.Println("DNS 采集器已启动 (强力匹配模式)...")
 
-	// 3. 开始解析
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	for packet := range packetSource.Packets() {
-		// 尝试解析 DNS 层
+	buf := make([]byte, 65536)
+	for {
+		n, _, err := syscall.Recvfrom(fd, buf, 0)
+		if err != nil {
+			continue
+		}
+
+		data := buf[:n]
+
+		// 2. 关键：手动定位 IP 层
+		// 监听 "any" 时，SLL 头部通常是 16 字节
+		// 但有些接口可能是 14 字节 (Ethernet)。我们通过查找 IP 版本号特征来匹配
+		var ipData []byte
+		for i := 0; i < 32 && i < len(data); i++ {
+			// IPv4 的版本号是 4，且首部长度通常是 20 字节 (0x45)
+			if (data[i] & 0xf0) == 0x40 {
+				ipData = data[i:]
+				break
+			}
+		}
+
+		if ipData == nil {
+			continue
+		}
+
+		// 3. 使用 gopacket 解析 IP 层及以上
+		packet := gopacket.NewPacket(ipData, layers.LayerTypeIPv4, gopacket.Default)
+
+		// 过滤 UDP
+		udpLayer := packet.Layer(layers.LayerTypeUDP)
+		if udpLayer == nil {
+			continue
+		}
+		udp, _ := udpLayer.(*layers.UDP)
+
+		// 过滤 DNS 响应 (源端口 53)
+		if udp.SrcPort != 53 {
+			continue
+		}
+
+		// 解析 DNS
 		dnsLayer := packet.Layer(layers.LayerTypeDNS)
 		if dnsLayer == nil {
 			continue
 		}
-
 		dnsMsg := dnsLayer.(*layers.DNS)
 
-		// 检查是否是响应包
 		if !dnsMsg.QR {
 			continue
 		}
 
 		for _, answer := range dnsMsg.Answers {
 			name := string(answer.Name)
-
-			// 提取 A 记录 (IPv4)
 			if answer.Type == layers.DNSTypeA {
 				ip := answer.IP.String()
 				dnsRecords.Add(ip, name)
-				log.Printf("[DNS A] %s -> %s", name, ip)
-			}
-			// 提取 AAAA 记录 (IPv6)
-			if answer.Type == layers.DNSTypeAAAA {
-				//ip := answer.IP.String()
-				// dnsRecords.Add(ip, name)
+				fmt.Printf("捕获成功: %s -> %s\n", name, ip)
 			}
 		}
 	}
