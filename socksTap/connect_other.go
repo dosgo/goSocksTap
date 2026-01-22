@@ -4,6 +4,7 @@
 package socksTap
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -11,7 +12,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -32,11 +32,7 @@ func (socksTap *SocksTap) handleConnection(c net.Conn) {
 	addrs := strings.Split(targetStr, ":")
 	isExclude := false
 	if socksTap.socksServerPid != 0 {
-		_pid, _, _ := getProcessBySrcPort(c.RemoteAddr().(*net.TCPAddr).Port)
-		if _pid == socksTap.socksServerPid {
-			isExclude = true
-		}
-
+		isExclude = getProcessBySrcPort(c.RemoteAddr().(*net.TCPAddr).Port, socksTap.socksServerPid)
 	}
 	if socksTap.localSocks != "" && socksTap.dialer != nil && comm.IsProxyRequiredFast(addrs[0]) && !isExclude {
 		domain, ok := socksTap.dnsRecords.Get(addrs[0])
@@ -109,49 +105,55 @@ func getOriginalDst(conn net.Conn) (string, error) {
 	return addr, err
 }
 
-func getProcessBySrcPort(srcPort int) (pid int, comm string, err error) {
-	// 1. 寻找端口对应的 Inode
-	inode := ""
-	data, _ := os.ReadFile("/proc/net/tcp")
-	lines := strings.Split(string(data), "\n")
+func getProcessBySrcPort(srcPort int, pid int) bool {
+	// 1. 构造十六进制端口后缀，例如 ":0050"
+	hexPortSuffix := fmt.Sprintf(":%04X", srcPort)
 
-	// 查找 16 进制端口号 (例如 80 端口是 0050)
-	hexPort := fmt.Sprintf(":%04X", srcPort)
-	for _, line := range lines {
-		if strings.Contains(line, hexPort) {
-			fields := strings.Fields(line)
-			if len(fields) > 9 {
-				inode = fields[9]
-				break
-			}
-		}
-	}
+	// 2. 需要检查的文件列表（支持 IPv4 和 IPv6）
+	files := []string{"/proc/net/tcp", "/proc/net/tcp6"}
 
-	if inode == "" || inode == "0" {
-		return 0, "", fmt.Errorf("未找到 Inode")
-	}
-
-	// 2. 遍历 /proc 找到对应的 PID
-	target := "socket:[" + inode + "]"
-	files, _ := os.ReadDir("/proc")
-	for _, f := range files {
-		// 只看数字名称的目录 (PID)
-		pidNum, err := strconv.Atoi(f.Name())
+	foundInodes := make(map[string]struct{})
+	for _, file := range files {
+		f, err := os.Open(file)
 		if err != nil {
 			continue
 		}
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := scanner.Text()
+			fields := strings.Fields(line)
+			if len(fields) < 10 {
+				continue
+			}
+			// local_address 是 fields[1]
+			if strings.HasSuffix(fields[1], hexPortSuffix) {
+				foundInodes[fields[9]] = struct{}{}
+			}
+		}
+		f.Close()
+	}
+	if len(foundInodes) == 0 {
+		fmt.Printf("foundInodes not\r\n")
+		return false
+	}
 
-		// 检查该进程下的所有文件描述符 (fd)
-		fdPath := fmt.Sprintf("/proc/%d/fd", pidNum)
-		fds, _ := os.ReadDir(fdPath)
-		for _, fd := range fds {
-			link, _ := os.Readlink(filepath.Join(fdPath, fd.Name()))
-			if link == target {
-				// 3. 找到 PID，读取进程名
-				commData, _ := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pidNum))
-				return pidNum, strings.TrimSpace(string(commData)), nil
+	// 3. 检查特定 PID 是否持有这些 Inode
+	fdPath := fmt.Sprintf("/proc/%d/fd", pid)
+	fds, err := os.ReadDir(fdPath)
+	if err != nil {
+		return false
+	}
+
+	for _, fd := range fds {
+		link, err := os.Readlink(filepath.Join(fdPath, fd.Name()))
+		if err != nil {
+			continue
+		}
+		for inode := range foundInodes {
+			if link == "socket:["+inode+"]" {
+				return true
 			}
 		}
 	}
-	return 0, "", fmt.Errorf("未找到进程")
+	return false
 }

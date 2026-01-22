@@ -17,7 +17,7 @@ func main() {
 	go forward.CollectDNSRecords(dnsRecords)
 	var excludePorts sync.Map
 	forward.NetEvent(os.Getpid(), &excludePorts)
-	pid, _ := netstat.PortGetPid("127.0.0.1:22")
+	pid, _ := netstat.PortGetPid("127.0.0.1:10801")
 	fmt.Printf("pid:%d\r\n", pid)
 	select {}
 }

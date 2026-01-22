@@ -43,7 +43,9 @@ func NewSocksTap(proxyPort uint16, localSocks string, mode int) *SocksTap {
 func (socksTap *SocksTap) Start() {
 	socksTap.run = true
 	if socksTap.localSocks != "" {
-		socksTap.socksServerPid, _ = netstat.PortGetPid(socksTap.localSocks)
+		var err error
+		socksTap.socksServerPid, err = netstat.PortGetPid(socksTap.localSocks)
+		fmt.Printf("socksTap.socksServerPid:%d err:%v\r\n", socksTap.socksServerPid, err)
 		socksTap.dnsRecords = expirable.NewLRU[string, string](10000, nil, time.Minute*5)
 		go forward.CollectDNSRecords(socksTap.dnsRecords)
 	}
