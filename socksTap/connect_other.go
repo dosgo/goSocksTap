@@ -37,7 +37,7 @@ func (socksTap *SocksTap) handleConnection(c net.Conn) {
 		//elapsed := time.Since(start)
 		//log.Printf("isPortOwnedByPID took %s", elapsed)
 	}
-	if socksTap.localSocks != "" && socksTap.dialer != nil && comm.IsProxyRequiredFast(addrs[0]) && !isExclude {
+	if socksTap.localSocks != "" && socksTap.socksClient != nil && comm.IsProxyRequiredFast(addrs[0]) && !isExclude {
 		domain, ok := socksTap.dnsRecords.Get(addrs[0])
 		if ok {
 			log.Printf("domain: %s\r\n", domain)
@@ -45,7 +45,7 @@ func (socksTap *SocksTap) handleConnection(c net.Conn) {
 		} else {
 			fmt.Printf("no domain remoteAddr:%s\r\n", targetStr)
 		}
-		targetConn, err = socksTap.dialer.Dial("tcp", targetStr)
+		targetConn, err = socksTap.socksClient.Dial("tcp", targetStr)
 	} else {
 		targetConn, err = dialer.Dial("tcp", targetStr)
 	}

@@ -24,6 +24,8 @@ var eventDivert *divert.Handle
 var divertDll = "WinDivert.dll"
 var divertSys = "WinDivert32.sys"
 
+var udpDivert *divert.Handle
+
 func dllInit(_divertDll string) {
 	_, err := os.Stat(_divertDll)
 	if err != nil {
@@ -79,7 +81,7 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 				switch rr := answer.(type) {
 				case *dns.A:
 					dnsRecords.Add(rr.A.String(), name)
-				//	log.Printf("[DNS A] 域名: %s -> IP: %s", name, rr.A.String())
+					//log.Printf("[DNS A] 域名: %s -> IP: %s", name, rr.A.String())
 				// 这里可以执行你的 GeoIP 分流逻辑
 				case *dns.AAAA:
 					//dnsRecords.Add(rr.AAAA.String(), name)
@@ -209,6 +211,9 @@ func CloseWinDivert() {
 	if tcpDivert != nil {
 		tcpDivert.Close()
 	}
+	if udpDivert != nil {
+		udpDivert.Close()
+	}
 	if eventDivert != nil {
 		eventDivert.Close()
 	}
@@ -217,5 +222,68 @@ func CloseWinDivert() {
 func CloseNetEvent() {
 	if eventDivert != nil {
 		eventDivert.Close()
+	}
+}
+
+func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map) {
+	// 过滤器：拦截出站 UDP，排除回环、DNS(53) 和 代理端口自身
+	filter := fmt.Sprintf(
+		"!loopback and outbound and udp and udp.DstPort != 53 and udp.DstPort != %d",
+		proxyPort,
+	)
+	var err error
+	udpDivert, err = divert.Open(filter, divert.LayerNetwork, 0, divert.FlagDefault)
+	if err != nil {
+		log.Printf("WinDivert UDP 打开失败: %v", err)
+		return
+	}
+	defer udpDivert.Close()
+
+	var addr divert.Address
+	buf := make([]byte, 1024*10)
+	for {
+		n, err := udpDivert.Recv(buf, &addr)
+		if err != nil || n == 0 {
+			continue
+		}
+
+		packet := buf[:n]
+		outbound := (addr.Flags & (0x01 << 1)) != 0
+		srcIP, srcPort, dstIP, dstPort := comm.ParsePacketInfoFast(packet)
+
+		if outbound && srcIP != nil {
+			// 1. 处理代理发回给客户端的包 (源端口是 proxyPort)
+			if srcPort == proxyPort {
+				key := fmt.Sprintf("udp:%d", dstPort) // 这里的 dstPort 是客户端的临时端口
+				if origPort, ok := originalPorts.Load(key); ok {
+
+					comm.ModifyPacketFast(packet, dstIP, origPort.(uint16), srcIP, dstPort)
+					addr.Flags = addr.Flags & ^uint8(0x02) // 设为入站
+					divert.CalcChecksums(packet, &addr, 0)
+					udpDivert.Send(packet, &addr)
+					continue
+				}
+			} else {
+				// 2. 处理客户端发出的请求包
+				// 排除代理程序自身的流量
+				if _, ok := excludePorts.Load(fmt.Sprintf("%d", srcPort)); !ok {
+					if comm.IsProxyRequiredFast(dstIP.String()) {
+						// 记录原始目标地址：客户端端口 -> 原始目标IP:端口
+						key := fmt.Sprintf("udp:%d", srcPort)
+						originalPorts.Store(key, dstPort)
+
+						// 重定向：目标改为本地 IP，端口改为代理端口
+						comm.ModifyPacketFast(packet, dstIP, srcPort, srcIP, proxyPort)
+
+						addr.Flags = addr.Flags & ^uint8(0x02) // 设为入站
+						divert.CalcChecksums(packet, &addr, 0)
+						udpDivert.Send(packet, &addr)
+						continue
+					}
+				}
+			}
+		}
+		// 默认原样放行
+		udpDivert.Send(packet, &addr)
 	}
 }

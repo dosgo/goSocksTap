@@ -4,23 +4,20 @@
 package netstat
 
 import (
+	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/cakturk/go-netstat/netstat"
 )
 
 /*为啥要用这方法,因为Process在一些电脑比较耗时间只有匹配的才获取*/
-func PortGetPid(lSocks string) (int, error) {
-	socksAddrs := strings.Split(lSocks, ":")
-	var lPort int
-	var err error
-	if len(socksAddrs) < 2 {
-		lPort, err = strconv.Atoi(socksAddrs[0])
-	} else {
-		lPort, err = strconv.Atoi(socksAddrs[1])
-	}
+func PortGetPid(laddr string) (int, error) {
+	u, err := url.Parse(laddr)
+	lPort, err := strconv.Atoi(u.Port())
 
+	if err != nil {
+		return 0, err
+	}
 	// get only listening TCP sockets
 	tabs, err := netstat.TCPSocks(func(s *netstat.SockTabEntry) bool {
 		return s.State == netstat.Listen && s.LocalAddr.Port == uint16(lPort)

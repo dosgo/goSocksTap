@@ -5,6 +5,7 @@ package netstat
 
 import (
 	"errors"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -13,9 +14,12 @@ import (
 )
 
 /*为啥要用这方法,因为Process在一些电脑比较耗时间只有匹配的才获取*/
-func PortGetPid(lSocks string) (int, error) {
-	socksAddrs := strings.Split(lSocks, ":")
-	lPort, err := strconv.Atoi(socksAddrs[1])
+func PortGetPid(laddr string) (int, error) {
+	u, err := url.Parse(laddr)
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		return 0, err
+	}
 	tbl, err := netstat.GetTCPTable2(true)
 	if err != nil {
 		return 0, err
@@ -27,7 +31,7 @@ func PortGetPid(lSocks string) (int, error) {
 			RemoteAddr: s[i].RemoteSock(),
 			State:      s[i].SockState(),
 		}
-		if ent.State == netstat.Listen && ent.LocalAddr.Port == uint16(lPort) {
+		if ent.State == netstat.Listen && ent.LocalAddr.Port == uint16(port) {
 			return int(s[i].WinPid), nil
 		}
 	}

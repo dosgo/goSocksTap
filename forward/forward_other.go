@@ -104,7 +104,7 @@ func NetEvent(pid int, excludePorts *sync.Map) {
 var mark int = 0x1aa
 
 func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map) {
-	cleanupNftables()
+	cleanupNftables("my_transparent_proxy")
 	setupNftables("matchNet", uint16(proxyPort), mark)
 }
 
@@ -113,7 +113,7 @@ func CloseNetEvent() {
 }
 
 func CloseWinDivert() {
-	cleanupNftables()
+	cleanupNftables("cleanupNftables")
 }
 func GetMark() int {
 	return mark
@@ -122,13 +122,13 @@ func SetMark(_mark int) {
 	mark = mark
 }
 
-func cleanupNftables() {
+func cleanupNftables(name string) {
 	//sudo nft delete table ip my_transparent_proxy
 	c := &nftables.Conn{}
 	// 1. 创建或清空表 (ip nat)
 	table := c.AddTable(&nftables.Table{
 		Family: nftables.TableFamilyIPv4,
-		Name:   "my_transparent_proxy",
+		Name:   name,
 	})
 	c.DelTable(table)
 	c.Flush()
