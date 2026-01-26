@@ -18,7 +18,7 @@ func main() {
 				NextProtos: []string{"h3"}, // 只允许 HTTP/3
 			},
 		},
-		Timeout: 5 * time.Second,
+		Timeout: 10 * time.Second,
 	}
 
 	// 2. 测试网址

@@ -97,7 +97,7 @@ func NetEvent(pid int, excludePorts *sync.Map) {
 	if pid > 0 {
 		bindPorts, _ := netstat.GetTcpBindList(pid, true)
 		for _, v := range bindPorts {
-			excludePorts.Store(fmt.Sprintf("%d", v), 1)
+			excludePorts.Store(fmt.Sprintf("tcp:%d", v), 1)
 		}
 	}
 
@@ -121,12 +121,12 @@ func NetEvent(pid int, excludePorts *sync.Map) {
 		switch addr.Event() {
 		case divert.EventSocketBind:
 			//	log.Printf("ip: %s\r\n", ip.String())
-			excludePorts.Store(fmt.Sprintf("%d", addr.Flow().LocalPort), 1)
+			excludePorts.Store(fmt.Sprintf("tcp:%d", addr.Flow().LocalPort), 1)
 		case divert.EventSocketConnect:
-			excludePorts.Store(fmt.Sprintf("%d", addr.Flow().LocalPort), 1)
+			excludePorts.Store(fmt.Sprintf("tcp:%d", addr.Flow().LocalPort), 1)
 		case divert.EventSocketClose:
 			//ip := net.IP(addr.Flow().LocalAddress[:4])
-			excludePorts.Delete(fmt.Sprintf("%d", addr.Flow().LocalPort))
+			excludePorts.Delete(fmt.Sprintf("tcp:%d", addr.Flow().LocalPort))
 		}
 	}
 }
@@ -175,7 +175,7 @@ func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 				}
 			} else {
 				//本进程的过滤
-				if _, ok := excludePorts.Load(fmt.Sprintf("%d", srcPort)); !ok {
+				if _, ok := excludePorts.Load(fmt.Sprintf("tcp:%d", srcPort)); !ok {
 
 					if comm.IsProxyRequiredFast(dstIP.String()) {
 						// 场景 B：客户端发起的原始请求包 (访问任意端口)
@@ -228,9 +228,10 @@ func CloseNetEvent() {
 func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map) {
 	// 过滤器：拦截出站 UDP，排除回环、DNS(53) 和 代理端口自身
 	filter := fmt.Sprintf(
-		"!loopback and outbound and udp and udp.DstPort != 53 and udp.DstPort != %d",
+		"!loopback and outbound  and udp and udp.DstPort != 53 and udp.DstPort != %d",
 		proxyPort,
 	)
+	//(udp.DstPort=443 or udp.SrcPort==%d)
 	var err error
 	udpDivert, err = divert.Open(filter, divert.LayerNetwork, 0, divert.FlagDefault)
 	if err != nil {
@@ -254,26 +255,25 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 		if outbound && srcIP != nil {
 			// 1. 处理代理发回给客户端的包 (源端口是 proxyPort)
 			if srcPort == proxyPort {
-				key := fmt.Sprintf("udp:%d", dstPort) // 这里的 dstPort 是客户端的临时端口
-				if origPort, ok := originalPorts.Load(key); ok {
-
-					comm.ModifyPacketFast(packet, dstIP, origPort.(uint16), srcIP, dstPort)
+				virtualPort := dstPort
+				addrInfo := GetAddrFromVirtualPort(virtualPort)
+				if addrInfo != nil {
+					comm.ModifyPacketFast(packet, addrInfo.DstIP, addrInfo.DstPort, srcIP, addrInfo.SrcPort)
+					//	fmt.Printf("dstIp:%s srcIP:%s\r\n", dstIP.String(), srcIP.String())
 					addr.Flags = addr.Flags & ^uint8(0x02) // 设为入站
 					divert.CalcChecksums(packet, &addr, 0)
 					udpDivert.Send(packet, &addr)
 					continue
 				}
+
 			} else {
 				// 2. 处理客户端发出的请求包
 				// 排除代理程序自身的流量
-				if _, ok := excludePorts.Load(fmt.Sprintf("%d", srcPort)); !ok {
+				if _, ok := excludePorts.Load(fmt.Sprintf("udp:%d", srcPort)); !ok {
 					if comm.IsProxyRequiredFast(dstIP.String()) {
-						// 记录原始目标地址：客户端端口 -> 原始目标IP:端口
-						key := fmt.Sprintf("udp:%d", srcPort)
-						originalPorts.Store(key, dstPort)
-
+						virtualPort := GetVirtualPort(srcPort, dstIP, dstPort)
 						// 重定向：目标改为本地 IP，端口改为代理端口
-						comm.ModifyPacketFast(packet, dstIP, srcPort, srcIP, proxyPort)
+						comm.ModifyPacketFast(packet, dstIP, virtualPort, srcIP, proxyPort)
 
 						addr.Flags = addr.Flags & ^uint8(0x02) // 设为入站
 						divert.CalcChecksums(packet, &addr, 0)

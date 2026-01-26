@@ -121,13 +121,13 @@ func (socksTap *SocksTap) startLocalUDPRelay() {
 
 	log.Printf("UDP Relay 启动在端口: %d\n", socksTap.proxyPort)
 
-	buf := make([]byte, 2048)
+	buf := make([]byte, 1024*3)
 	for {
 		n, remoteAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			continue
 		}
 		// 处理每个 UDP 报文
-		go socksTap.handleUDPData(conn, remoteAddr, buf[:n])
+		socksTap.handleUDPData(conn, remoteAddr, buf[:n])
 	}
 }
