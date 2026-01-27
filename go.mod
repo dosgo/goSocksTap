@@ -8,13 +8,13 @@ require (
 	github.com/bi-zone/etw v0.0.0-20210519083747-fe9042eb0ea8
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/cilium/ebpf v0.12.3
+	github.com/florianl/go-nfqueue/v2 v2.0.2
 	github.com/google/gopacket v1.1.19
 	github.com/google/nftables v0.3.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/imgk/divert-go v0.1.0
 	github.com/miekg/dns v1.1.59
 	github.com/quic-go/quic-go v0.59.0
-	github.com/txthinking/socks5 v0.0.0-20251011041537-5c31f201a10e
 	github.com/vishvananda/netlink v1.3.0
 	github.com/wzshiming/socks5 v0.7.0
 	github.com/yl2chen/cidranger v1.0.2
@@ -27,10 +27,8 @@ require (
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
 	github.com/mdlayher/socket v0.5.0 // indirect
-	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/rogpeppe/go-internal v1.11.0 // indirect
-	github.com/txthinking/runnergroup v0.0.0-20210608031112-152c7c4432bf // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8 // indirect

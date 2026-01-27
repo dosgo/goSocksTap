@@ -6,6 +6,7 @@ package forward
 import (
 	"sync"
 
+	"github.com/dosgo/goSocksTap/comm/udpProxy"
 	"github.com/dosgo/goSocksTap/winDivert"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 )
@@ -23,8 +24,8 @@ func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 	winDivert.RedirectAllTCP(proxyPort, excludePorts, originalPorts)
 }
 
-func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map) {
-	winDivert.RedirectAllUDP(proxyPort, excludePorts, originalPorts)
+func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map, udpNat *udpProxy.UdpNat) {
+	winDivert.RedirectAllUDP(proxyPort, excludePorts, originalPorts, udpNat)
 }
 
 func CloseNetEvent() {

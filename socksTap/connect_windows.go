@@ -11,11 +11,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/cakturk/go-netstat/netstat"
-	"github.com/dosgo/goSocksTap/winDivert"
 )
 
 func (socksTap *SocksTap) handleConnection(conn net.Conn) {
@@ -24,7 +22,7 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 		// 核心点：由于使用了反射，conn.RemoteAddr() 实际上是原始的目标服务器地址
 		//	log.Printf("[拦截流量] 目标: %s\n", tcpAddr.String())
 		key := fmt.Sprintf("%d", tcpAddr.Port)
-		if origPort, ok := originalPorts.Load(key); ok {
+		if origPort, ok := socksTap.originalPorts.Load(key); ok {
 			var targetConn net.Conn
 			var err error
 			remoteAddr := net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16))))
@@ -44,7 +42,7 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 				log.Printf("tcp connect err: %v", err)
 				return
 			}
-			defer excludePorts.Delete(fmt.Sprintf("tcp:%d", targetConn.LocalAddr().(*net.TCPAddr).Port))
+			defer socksTap.excludePorts.Delete(fmt.Sprintf("tcp:%d", targetConn.LocalAddr().(*net.TCPAddr).Port))
 			//log.Printf("src port:%d\r\n", targetConn.LocalAddr().(*net.TCPAddr).Port)
 			defer targetConn.Close()
 			// 双向数据拷贝 (你可以在这里打印/记录 payload 内容)
@@ -59,23 +57,46 @@ func getDialer() *net.Dialer {
 	return &net.Dialer{}
 }
 
-var clients sync.Map // key: clientAddr.String(), value: net.Conn
+func (socksTap *SocksTap) startLocalUDPRelay() {
+	addr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("0.0.0.0:%d", socksTap.proxyPort))
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		log.Fatalf("UDP 代理监听失败: %v", err)
+	}
+	defer conn.Close()
+
+	log.Printf("UDP Relay 启动在端口: %d\n", socksTap.proxyPort)
+
+	buf := make([]byte, 1024*3)
+	for {
+		n, remoteAddr, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			continue
+		}
+		// 处理每个 UDP 报文
+		socksTap.handleUDPData(conn, remoteAddr, buf[:n])
+	}
+}
+
 func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.UDPAddr, data []byte) {
 
-	addrInfo := winDivert.GetAddrFromVirtualPort(uint16(clientAddr.Port))
+	addrInfo := socksTap.udpNat.GetAddrFromVirtualPort(uint16(clientAddr.Port))
 	if addrInfo == nil {
 		fmt.Printf("no origPort clientAddr.Port:%d\r\n", clientAddr.Port)
 		return
 	}
 	origPort := addrInfo.DstPort
+
+	vPortKey := fmt.Sprintf("udp:%d", clientAddr.Port)
 	// 检查这个“客户端”是否已经有对应的“转发隧道”了
-	conn, ok := clients.Load(clientAddr.String())
+	conn, ok := socksTap.udpClients.Load(vPortKey)
 	if !ok {
 		remoteAddr := net.JoinHostPort(clientAddr.IP.String(), strconv.Itoa(int(origPort)))
 		var proxyConn net.Conn
+		var lPort uint16 = 0
 		// 如果没有，就 Dial 一个（类似于 TCP 的 Accept 过程）
 		// 这里的 dialer 就是你之前配置的带 SO_MARK 的 socks5.Dialer
-		if false && socksTap.localSocks != "" && socksTap.socksClient != nil && !isPortOwnedByPID(int(addrInfo.SrcPort), socksTap.socksServerPid) {
+		if socksTap.localSocks != "" && socksTap.socksClient != nil && !isPortOwnedByPID(int(addrInfo.SrcPort), socksTap.socksServerPid) {
 			domain, ok := socksTap.dnsRecords.Get(clientAddr.IP.String())
 			if ok {
 				//log.Printf("domain: %s\r\n", domain)
@@ -90,6 +111,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 				fmt.Printf("udp err:%+v\r\n", err)
 				return
 			}
+
 			proxyConn = conn
 
 		} else {
@@ -100,12 +122,16 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 			}
 			proxyConn, err = net.DialUDP("udp", nil, remoteUdpAddr)
 			lAddr := proxyConn.LocalAddr().(*net.UDPAddr)
-			excludePorts.Store(fmt.Sprintf("udp:%d", lAddr.Port), 1) // 告诉 WinDivert：这个端口发的包别拦
+			socksTap.excludePorts.Store(fmt.Sprintf("udp:%d", lAddr.Port), time.Now().Unix()) // 告诉 WinDivert：这个端口发的包别拦
+			lPort = uint16(lAddr.Port)
 		}
 		// 启动一个协程专门负责这个“连接”的回包（像 TCP 处理一样）
-		go func(c net.Conn, addr *net.UDPAddr) {
+		go func(c net.Conn, addr *net.UDPAddr, lport uint16) {
 			defer c.Close()
-			defer clients.Delete(clientAddr.String())
+			defer socksTap.udpClients.Delete(vPortKey)
+			if lport != 0 {
+				defer socksTap.excludePorts.Delete(fmt.Sprintf("udp:%d", lport)) // 告诉 WinDivert：这个端口发的包别拦
+			}
 			resp := make([]byte, 2048)
 			for {
 				c.SetReadDeadline(time.Now().Add(time.Second * 60))
@@ -115,8 +141,8 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 				} // 这里不需要 ReadFrom，因为它已经“连”上了
 				localConn.WriteToUDP(resp[:rn], addr) // 发回给客户端
 			}
-		}(proxyConn, clientAddr)
-		clients.Store(clientAddr.String(), proxyConn)
+		}(proxyConn, clientAddr, lPort)
+		socksTap.udpClients.Store(vPortKey, proxyConn)
 		conn = proxyConn
 	}
 	// 像 TCP 写入一样简单
@@ -132,10 +158,8 @@ func isPortOwnedByPID(srcPort int, targetPid int) bool {
 	s := tbl.Rows()
 	for i := range s {
 		if s[i].LocalSock().Port == uint16(srcPort) && (int(s[i].WinPid) == targetPid || int(s[i].WinPid) == _slefPid) {
-			fmt.Print("isPortOwnedByPID true")
 			return true
 		}
-
 	}
 	return false
 }

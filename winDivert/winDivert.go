@@ -12,6 +12,7 @@ import (
 
 	"github.com/dosgo/goSocksTap/comm"
 	"github.com/dosgo/goSocksTap/comm/netstat"
+	"github.com/dosgo/goSocksTap/comm/udpProxy"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/imgk/divert-go"
 	"github.com/miekg/dns"
@@ -225,7 +226,7 @@ func CloseNetEvent() {
 	}
 }
 
-func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map) {
+func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map, udpNat *udpProxy.UdpNat) {
 	// 过滤器：拦截出站 UDP，排除回环、DNS(53) 和 代理端口自身
 	filter := fmt.Sprintf(
 		"!loopback and outbound  and udp and udp.DstPort != 53 and udp.DstPort != %d",
@@ -256,7 +257,7 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 			// 1. 处理代理发回给客户端的包 (源端口是 proxyPort)
 			if srcPort == proxyPort {
 				virtualPort := dstPort
-				addrInfo := GetAddrFromVirtualPort(virtualPort)
+				addrInfo := udpNat.GetAddrFromVirtualPort(virtualPort)
 				if addrInfo != nil {
 					comm.ModifyPacketFast(packet, addrInfo.DstIP, addrInfo.DstPort, srcIP, addrInfo.SrcPort)
 					//	fmt.Printf("dstIp:%s srcIP:%s\r\n", dstIP.String(), srcIP.String())
@@ -271,7 +272,7 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 				// 排除代理程序自身的流量
 				if _, ok := excludePorts.Load(fmt.Sprintf("udp:%d", srcPort)); !ok {
 					if comm.IsProxyRequiredFast(dstIP.String()) {
-						virtualPort := GetVirtualPort(srcPort, dstIP, dstPort)
+						virtualPort := udpNat.GetVirtualPort(srcPort, dstIP, dstPort)
 						// 重定向：目标改为本地 IP，端口改为代理端口
 						comm.ModifyPacketFast(packet, dstIP, virtualPort, srcIP, proxyPort)
 
