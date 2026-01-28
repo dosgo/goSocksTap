@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cakturk/go-netstat/netstat"
+	"golang.org/x/sys/windows"
 )
 
 func (socksTap *SocksTap) handleConnection(conn net.Conn) {
@@ -26,7 +27,14 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 			var targetConn net.Conn
 			var err error
 			remoteAddr := net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16))))
-			if socksTap.localSocks != "" && socksTap.socksClient != nil {
+
+			isExclude := false
+			//排除id
+			if socksTap.localSocks != "" {
+				isExclude = isTcpPortOwnedByPID(int(tcpAddr.Port), socksTap.socksServerPid)
+			}
+
+			if socksTap.localSocks != "" && socksTap.socksClient != nil && !isExclude {
 				domain, ok := socksTap.dnsRecords.Get(tcpAddr.IP.String())
 				if ok {
 					//log.Printf("domain: %s\r\n", domain)
@@ -73,9 +81,16 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 		remoteAddr := net.JoinHostPort(clientAddr.IP.String(), strconv.Itoa(int(origPort)))
 		var proxyConn net.Conn
 		var lPort uint16 = 0
+
+		isExclude := false
+		//排除id
+		if socksTap.localSocks != "" {
+			isExclude = isUdpPortOwnedByPID(int(addrInfo.SrcPort), socksTap.socksServerPid)
+		}
+
 		// 如果没有，就 Dial 一个（类似于 TCP 的 Accept 过程）
 		// 这里的 dialer 就是你之前配置的带 SO_MARK 的 socks5.Dialer
-		if socksTap.localSocks != "" && socksTap.socksClient != nil && !isPortOwnedByPID(int(addrInfo.SrcPort), socksTap.socksServerPid) {
+		if socksTap.localSocks != "" && socksTap.socksClient != nil && !isExclude {
 			domain, ok := socksTap.dnsRecords.Get(clientAddr.IP.String())
 			if ok {
 				//log.Printf("domain: %s\r\n", domain)
@@ -127,9 +142,53 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 	// 像 TCP 写入一样简单
 	conn.(net.Conn).Write(data)
 }
-func isPortOwnedByPID(srcPort int, targetPid int) bool {
+func isUdpPortOwnedByPID(srcPort int, targetPid int) bool {
+	//进程没了所有都直连
+	if !IsProcessAlive(targetPid) {
+		return true
+	}
 	// 获取所有 UDP 状态
 	tbl, err := netstat.GetUDPTableOwnerPID(true)
+	if err != nil {
+		return false
+	}
+	var _slefPid = os.Getpid()
+	s := tbl.Rows()
+	for i := range s {
+		if s[i].LocalSock().Port == uint16(srcPort) && (int(s[i].WinPid) == targetPid || int(s[i].WinPid) == _slefPid) {
+			return true
+		}
+	}
+	return false
+}
+
+func IsProcessAlive(pid int) bool {
+	// 1. 尝试通过 PID 获取进程句柄
+	// PROCESS_QUERY_LIMITED_INFORMATION 权限足以查询退出状态，且对系统资源占用最小
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		// 如果报错，通常是因为 PID 已经不存在，或者权限极高无法访问（如系统核心进程）
+		return false
+	}
+	defer windows.CloseHandle(h)
+
+	// 2. 获取进程的退出码
+	var exitCode uint32
+	err = windows.GetExitCodeProcess(h, &exitCode)
+	if err != nil {
+		return false
+	}
+
+	// 3. 关键判断：259 (STILL_ACTIVE) 代表进程仍在运行
+	return exitCode == 259
+}
+
+func isTcpPortOwnedByPID(srcPort int, targetPid int) bool {
+	//进程没了所有都直连
+	if !IsProcessAlive(targetPid) {
+		return true
+	}
+	tbl, err := netstat.GetTCPTable2(true)
 	if err != nil {
 		return false
 	}

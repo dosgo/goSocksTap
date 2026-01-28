@@ -32,7 +32,7 @@ func (socksTap *SocksTap) handleConnection(c net.Conn) {
 	}
 	addrs := strings.Split(targetStr, ":")
 	isExclude := false
-	if socksTap.socksServerPid != 0 {
+	if socksTap.localSocks != "" {
 		isExclude = isPortOwnedByPID(c.RemoteAddr().(*net.TCPAddr).Port, socksTap.socksServerPid, false)
 	}
 	if socksTap.localSocks != "" && socksTap.socksClient != nil && comm.IsProxyRequiredFast(addrs[0]) && !isExclude {
@@ -114,8 +114,9 @@ func isPortOwnedByPID(srcPort int, targetPid int, udp bool) bool {
 	// 这一步通常非常快，因为 FD 数量有限
 	fdPath := fmt.Sprintf("/proc/%d/fd", targetPid)
 	fds, err := os.ReadDir(fdPath)
+	//如果进程没了全部直连避免死循环
 	if err != nil {
-		return false
+		return true
 	}
 
 	targetInodes := make(map[string]struct{})
@@ -170,38 +171,6 @@ func isPortOwnedByPID(srcPort int, targetPid int, udp bool) bool {
 	}
 	return false
 }
-func isPortBelongsToApp(port int, pid int) bool {
-	// 1. 获取目标进程所有的 Socket Inodes
-	targetInodes := make(map[string]bool)
-	fdPath := fmt.Sprintf("/proc/%d/fd", pid)
-	fds, _ := os.ReadDir(fdPath)
-	for _, fd := range fds {
-		link, _ := os.Readlink(filepath.Join(fdPath, fd.Name()))
-		if strings.HasPrefix(link, "socket:[") {
-			inode := link[8 : len(link)-1]
-			targetInodes[inode] = true
-		}
-	}
-
-	// 2. 直接查找 /proc/net/udp，匹配 Inode
-	// 这样比匹配端口更准确，因为 Inode 是唯一的 ID
-	data, _ := os.ReadFile("/proc/net/udp")
-	lines := strings.Split(string(data), "\n")
-	hexPort := fmt.Sprintf(":%04X", port)
-
-	for _, line := range lines {
-		if strings.Contains(line, hexPort) {
-			fields := strings.Fields(line)
-			if len(fields) > 9 {
-				inode := fields[9]
-				if targetInodes[inode] {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
 
 func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.UDPAddr, data []byte) {
 	addrInfo := socksTap.udpNat.GetAddrFromVirtualPort(uint16(clientAddr.Port))
@@ -216,7 +185,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 
 	if !ok {
 		isExclude := false
-		if socksTap.socksServerPid != 0 {
+		if socksTap.localSocks != "" {
 			isExclude = isPortOwnedByPID(int(addrInfo.SrcPort), socksTap.socksServerPid, true)
 		}
 		var proxyConn net.Conn

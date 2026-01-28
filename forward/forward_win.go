@@ -17,7 +17,6 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 
 func NetEvent(pid int, excludePorts *sync.Map) {
 	winDivert.NetEvent(pid, excludePorts)
-	//winDivert.NetEventUdp(pid, excludePorts)
 }
 
 func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map) {
