@@ -4,7 +4,6 @@
 package socksTap
 
 import (
-	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/dosgo/goSocksTap/comm"
 	"github.com/dosgo/goSocksTap/forward"
+	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
@@ -106,72 +106,6 @@ func getOriginalDst(conn net.Conn) (string, error) {
 	return addr, err
 }
 
-func isPortOwnedByPID(srcPort int, targetPid int, udp bool) bool {
-	// 1. 预先构造端口搜索特征 (例如 ":0050")
-	hexPortSuffix := fmt.Sprintf(":%04X", srcPort)
-
-	// 2. 扫描目标进程的 FD，获取它持有的所有 Socket Inode
-	// 这一步通常非常快，因为 FD 数量有限
-	fdPath := fmt.Sprintf("/proc/%d/fd", targetPid)
-	fds, err := os.ReadDir(fdPath)
-	//如果进程没了全部直连避免死循环
-	if err != nil {
-		return true
-	}
-
-	targetInodes := make(map[string]struct{})
-	for _, fd := range fds {
-		link, err := os.Readlink(filepath.Join(fdPath, fd.Name()))
-		if err != nil || !strings.HasPrefix(link, "socket:[") {
-			continue
-		}
-		// 提取 socket:[12345] 中的 12345
-		inode := link[8 : len(link)-1]
-		targetInodes[inode] = struct{}{}
-	}
-
-	if len(targetInodes) == 0 {
-		return false
-	}
-
-	// 3. 仅当进程持有 Socket 时，才去解析 TCP 表
-	files := []string{"/proc/net/tcp", "/proc/net/tcp6"}
-	if udp {
-		files = []string{"/proc/net/udp", "/proc/net/udp6"}
-	}
-	for _, file := range files {
-		f, err := os.Open(file)
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := scanner.Text()
-			// 快速过滤：如果这一行不包含我们的端口，直接跳过，不用做 Fields 分割
-
-			if !strings.Contains(line, hexPortSuffix) {
-				continue
-			}
-
-			fields := strings.Fields(line)
-			if len(fields) < 10 {
-				continue
-			}
-
-			// 匹配本地端口且 Inode 在该进程的 map 中
-			// fields[1] 是 local_address, fields[9] 是 inode
-			if strings.HasSuffix(fields[1], hexPortSuffix) {
-				if _, ok := targetInodes[fields[9]]; ok {
-					f.Close()
-					return true
-				}
-			}
-		}
-		f.Close()
-	}
-	return false
-}
-
 func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.UDPAddr, data []byte) {
 	addrInfo := socksTap.udpNat.GetAddrFromVirtualPort(uint16(clientAddr.Port))
 	if addrInfo == nil {
@@ -238,4 +172,66 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 	}
 	// 像 TCP 写入一样简单
 	conn.(net.Conn).Write(data)
+}
+func isPortOwnedByPID(srcPort int, targetPid int, udp bool) bool {
+	fdPath := fmt.Sprintf("/proc/%d/fd", targetPid)
+	fds, err := os.ReadDir(fdPath)
+	//如果进程没了全部直连避免死循环
+	if err != nil {
+		return true
+	}
+
+	targetInodes := make(map[uint32]struct{})
+	for _, fd := range fds {
+		link, err := os.Readlink(filepath.Join(fdPath, fd.Name()))
+		if err != nil || !strings.HasPrefix(link, "socket:[") {
+			continue
+		}
+		// 提取 socket:[12345] 中的 12345
+		inodeStr := link[8 : len(link)-1]
+		inode, err := strconv.ParseUint(inodeStr, 10, 32)
+		if err == nil {
+			targetInodes[uint32(inode)] = struct{}{}
+		}
+	}
+
+	if len(targetInodes) == 0 {
+		return false
+	}
+
+	families := []uint8{syscall.AF_INET, syscall.AF_INET6}
+
+	for _, family := range families {
+		if udp {
+			sockets, err := netlink.SocketDiagUDPInfo(family) // 也可以是
+			if err != nil {
+				return false
+			}
+			for _, s := range sockets {
+				// 匹配端口
+				if s.InetDiagMsg.ID.SourcePort == uint16(srcPort) {
+					// 在 Linux 中，Netlink 诊断信息直接包含 Inode
+					if _, ok := targetInodes[s.InetDiagMsg.INode]; ok {
+						return true
+					}
+				}
+			}
+		} else {
+			sockets, err := netlink.SocketDiagTCPInfo(family)
+			if err != nil {
+				return false
+			}
+			for _, s := range sockets {
+				// 匹配端口
+				if s.InetDiagMsg.ID.SourcePort == uint16(srcPort) {
+					// 在 Linux 中，Netlink 诊断信息直接包含 Inode
+					if _, ok := targetInodes[s.InetDiagMsg.INode]; ok {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
 }
