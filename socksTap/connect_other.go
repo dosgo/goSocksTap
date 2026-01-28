@@ -193,7 +193,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 		remoteAddr := net.JoinHostPort(clientAddr.IP.String(), strconv.Itoa(int(origPort)))
 		// 如果没有，就 Dial 一个（类似于 TCP 的 Accept 过程）
 		// 这里的 dialer 就是你之前配置的带 SO_MARK 的 socks5.Dialer
-		if socksTap.localSocks != "" && socksTap.socksClient != nil && !isExclude {
+		if socksTap.localSocks != "" && socksTap.socksClient != nil && comm.IsProxyRequiredFast(clientAddr.IP.String()) && !isExclude {
 			domain, ok := socksTap.dnsRecords.Get(clientAddr.IP.String())
 			if ok {
 				//log.Printf("domain: %s\r\n", domain)

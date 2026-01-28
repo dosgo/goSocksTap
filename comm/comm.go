@@ -2,6 +2,7 @@ package comm
 
 import (
 	"net"
+	"net/netip"
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -74,6 +75,16 @@ func IsProxyRequiredFast(ipStr string) bool {
 	if proxyMode == 0 {
 		return true
 	}
+	//局域网ip也不代理
+	addr, err := netip.ParseAddr(ipStr)
+	if err != nil {
+		return false
+	}
+	// IsPrivate 涵盖了 RFC 1918 (IPv4) 和 RFC 4193 (IPv6)
+	if addr.IsPrivate() {
+		return false
+	}
+
 	// 1. 检查缓存 (Fast Path)
 	if isChina, ok := geoCache.Get(ipStr); ok {
 		return !isChina // 如果是中国 IP，则不需要代理
