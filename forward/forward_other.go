@@ -190,7 +190,6 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 		fmt.Println("could not open nfqueue socket:", err)
 		return
 	}
-	//defer nf.Close()
 
 	// Avoid receiving ENOBUFS errors.
 	if err := nf.SetOption(netlink.NoENOBUFS, true); err != nil {
@@ -198,8 +197,6 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 			netlink.NoENOBUFS, err)
 		return
 	}
-
-	//ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
 
 	fn := func(p nfqueue.Attribute) int {
 		// 获取 ID 和 原始数据
@@ -297,7 +294,7 @@ func CloseNetEvent() {
 }
 
 func CloseWinDivert() {
-	cleanupNftables("cleanupNftables")
+	cleanupNftables("my_proxy_tcp")
 	cleanupNftables("my_proxy_udp")
 }
 func GetMark() int {
