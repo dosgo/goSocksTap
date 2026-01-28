@@ -57,27 +57,6 @@ func getDialer() *net.Dialer {
 	return &net.Dialer{}
 }
 
-func (socksTap *SocksTap) startLocalUDPRelay() {
-	addr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("0.0.0.0:%d", socksTap.proxyPort))
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		log.Fatalf("UDP 代理监听失败: %v", err)
-	}
-	defer conn.Close()
-
-	log.Printf("UDP Relay 启动在端口: %d\n", socksTap.proxyPort)
-
-	buf := make([]byte, 1024*3)
-	for {
-		n, remoteAddr, err := conn.ReadFromUDP(buf)
-		if err != nil {
-			continue
-		}
-		// 处理每个 UDP 报文
-		socksTap.handleUDPData(conn, remoteAddr, buf[:n])
-	}
-}
-
 func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.UDPAddr, data []byte) {
 
 	addrInfo := socksTap.udpNat.GetAddrFromVirtualPort(uint16(clientAddr.Port))

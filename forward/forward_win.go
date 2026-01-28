@@ -35,3 +35,6 @@ func CloseNetEvent() {
 func CloseWinDivert() {
 	winDivert.CloseWinDivert()
 }
+func ForceRestartWithGID(pid int) (int, error) {
+	return 0, nil
+}

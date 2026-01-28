@@ -13,8 +13,10 @@ require (
 	github.com/google/nftables v0.3.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/imgk/divert-go v0.1.0
+	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42
 	github.com/miekg/dns v1.1.59
 	github.com/quic-go/quic-go v0.59.0
+	github.com/ti-mo/conntrack v0.6.0
 	github.com/vishvananda/netlink v1.3.0
 	github.com/wzshiming/socks5 v0.7.0
 	github.com/yl2chen/cidranger v1.0.2
@@ -24,11 +26,12 @@ require (
 
 require (
 	github.com/Microsoft/go-winio v0.6.0 // indirect
-	github.com/google/go-cmp v0.6.0 // indirect
-	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
-	github.com/mdlayher/socket v0.5.0 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/mdlayher/socket v0.5.1 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/rogpeppe/go-internal v1.11.0 // indirect
+	github.com/ti-mo/netfilter v0.5.3 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8 // indirect

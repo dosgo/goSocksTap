@@ -52,7 +52,6 @@ func (socksTap *SocksTap) Start() {
 	if socksTap.localSocks != "" {
 		var err error
 		socksTap.socksServerPid, err = netstat.PortGetPid(socksTap.localSocks)
-		fmt.Printf("socksTap.socksServerPid:%d err:%v\r\n", socksTap.socksServerPid, err)
 		socksTap.dnsRecords = expirable.NewLRU[string, string](10000, nil, time.Minute*5)
 		socksTap.socksClient, err = socks5.NewDialer(socksTap.localSocks)
 		if err != nil {
@@ -113,5 +112,26 @@ func (socksTap *SocksTap) startLocalRelay() {
 			continue
 		}
 		go socksTap.handleConnection(conn)
+	}
+}
+
+func (socksTap *SocksTap) startLocalUDPRelay() {
+	addr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("0.0.0.0:%d", socksTap.proxyPort))
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		log.Fatalf("UDP 代理监听失败: %v", err)
+	}
+	defer conn.Close()
+
+	log.Printf("UDP Relay 启动在端口: %d\n", socksTap.proxyPort)
+
+	buf := make([]byte, 1024*3)
+	for {
+		n, remoteAddr, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			continue
+		}
+		// 处理每个 UDP 报文
+		socksTap.handleUDPData(conn, remoteAddr, buf[:n])
 	}
 }

@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/dosgo/goSocksTap/comm/udpProxy"
 	nfqueue "github.com/florianl/go-nfqueue/v2"
@@ -108,7 +110,61 @@ func NetEvent(pid int, excludePorts *sync.Map) {
 
 }
 
+func ForceRestartWithGID(pid int) (int, error) {
+
+	// 1. 获取原进程的 Uid、路径、参数、环境变量、工作目录
+	status, _ := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	var originalUid uint32
+	for _, line := range strings.Split(string(status), "\n") {
+		if strings.HasPrefix(line, "Uid:") {
+			fmt.Sscanf(line, "Uid:\t%d", &originalUid)
+			break
+		}
+	}
+
+	exe, _ := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	cwd, _ := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+
+	rawArgs, _ := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	args := strings.Split(string(rawArgs), "\x00")
+	if len(args) > 0 && args[len(args)-1] == "" {
+		args = args[:len(args)-1]
+	}
+
+	rawEnv, _ := os.ReadFile(fmt.Sprintf("/proc/%d/environ", pid))
+	env := strings.Split(string(rawEnv), "\x00")
+
+	// 2. 杀掉旧进程
+	proc, _ := os.FindProcess(pid)
+	_ = proc.Signal(syscall.SIGKILL) // 暴力一点，确保杀掉
+	time.Sleep(time.Millisecond * 100)
+	// 3. 构造新进程并注入 GID
+	cmd := exec.Command(exe, args[1:]...)
+	cmd.Dir = cwd
+	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{
+			Uid:    originalUid, // 保持原 UID
+			Gid:    uint32(gid), // 强制改 GID
+			Groups: []uint32{uint32(gid)},
+		},
+		Setsid: true, // 让它在后台独立运行
+	}
+
+	fmt.Printf("[*] 正在重启 PID %d: %s (UID: %d, GID: %d)\n", pid, exe, originalUid, gid)
+	if err := cmd.Start(); err != nil {
+		return 0, fmt.Errorf("启动新进程失败: %v", err)
+	}
+	// 获取新生成的 PID
+	newPid := cmd.Process.Pid
+
+	// 必须释放资源：因为 Setsid=true，新进程已独立，如果不 Release 会产生僵尸记录
+	cmd.Process.Release()
+	return newPid, nil
+}
+
 var mark int = 0x1aa
+var gid uint32 = 2000
 
 func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map) {
 	cleanupNftables("my_proxy_tcp")
@@ -124,7 +180,7 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 	config := nfqueue.Config{
 		NfQueue:      nfnum,
 		MaxPacketLen: 0xFFFF,
-		MaxQueueLen:  0xFF,
+		MaxQueueLen:  0xFFFF,
 		Copymode:     nfqueue.NfQnlCopyPacket,
 		WriteTimeout: 15 * time.Millisecond,
 	}
@@ -143,7 +199,7 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 		return
 	}
 
-	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	//ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
 
 	fn := func(p nfqueue.Attribute) int {
 		// 获取 ID 和 原始数据
@@ -192,7 +248,7 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 	}
 
 	// Register your function to listen on nflqueue queue 100
-	err = nf.RegisterWithErrorFunc(ctx, fn, func(e error) int {
+	err = nf.RegisterWithErrorFunc(context.Background(), fn, func(e error) int {
 		fmt.Println(err)
 		return -1
 	})
@@ -250,7 +306,9 @@ func GetMark() int {
 func SetMark(_mark int) {
 	mark = mark
 }
-
+func GetGid() uint32 {
+	return gid
+}
 func cleanupNftables(name string) {
 	//sudo nft delete table ip my_transparent_proxy
 	c := &nftables.Conn{}
@@ -361,26 +419,6 @@ func setupNftables(setName string, proxyPort uint16, mark int) {
 			&expr.Verdict{Kind: expr.VerdictAccept},
 		},
 	})
-	cgroupID, err := getCgroupID("/sys/fs/cgroup/no_proxy_group")
-	if err != nil {
-		log.Fatal(err)
-	}
-	c.AddRule(&nftables.Rule{
-		Table: table,
-		Chain: chain,
-		Exprs: []expr.Any{
-			&expr.Socket{Key: expr.SocketKeyCgroupv2},
-			// 这里匹配 cgroup 的 path 或者 ID
-			// 简单做法是直接在命令行执行一次：
-			// nft add rule ip my_proxy_udp output socket cgroupv2 level 2 "proxy_bypass" accept
-			&expr.Cmp{
-				Op:       expr.CmpOpEq,
-				Register: 1,
-				Data:     cgroupID, // 这需要你先从文件系统获取 cgroup 的 handle
-			},
-			&expr.Verdict{Kind: expr.VerdictAccept},
-		},
-	})
 
 	// 4. 添加规则：meta skmark != 0x1A && ip daddr @proxy_active_set redirect to :7080
 	portBytes := make([]byte, 2)
@@ -418,49 +456,6 @@ func setupNftables(setName string, proxyPort uint16, mark int) {
 			addNetworkSet(c, set)
 		}
 	}()
-}
-
-func getCgroupID(path string) ([]byte, error) {
-	// 1. 手动定义 FileHandle 头部大小 (linux/f_handle.h)
-	// struct file_handle { unsigned int handle_bytes; int handle_type; };
-	// 两个 int32 共 8 字节
-	const sizeofFileHandle = 8
-
-	// 准备缓冲区：头部(8字节) + 句柄数据(通常为8字节的inode)
-	// 我们预留大一点防止溢出
-
-	// 将路径转换为 C 风格字符串指针
-	pathPtr, err := unix.BytePtrFromString(path)
-	if err != nil {
-		return nil, err
-	}
-
-	var mountID int32
-	// 预留 handle 空间 (struct file_handle + 8 bytes data)
-	handle := make([]byte, 8+64)
-	var rawAtFdCwd int = unix.AT_FDCWD
-	// 2. 执行系统调用，注意 AT_FDCWD 的转换
-	_, _, errno := unix.Syscall6(
-		unix.SYS_NAME_TO_HANDLE_AT,
-		uintptr(rawAtFdCwd), // 修正点：int 强制中转
-		uintptr(unsafe.Pointer(pathPtr)),
-		uintptr(unsafe.Pointer(&handle[0])),
-		uintptr(unsafe.Pointer(&mountID)),
-		0, 0,
-	)
-
-	// EOVERFLOW 是正常的，因为我们可能没提前告诉内核 handle 的大小，
-	// 但内核依然会把 ID 填入 handle 剩下的字节中
-	if errno != 0 && errno != unix.EOVERFLOW {
-		return nil, fmt.Errorf("syscall failed with errno: %v", errno)
-	}
-
-	// 3. 提取 8 字节的 Cgroup ID
-	// 跳过头部的 8 字节 (handle_bytes 和 handle_type)
-	id := make([]byte, 8)
-	copy(id, handle[sizeofFileHandle:sizeofFileHandle+8])
-
-	return id, nil
 }
 
 /*添加网段到集合*/
@@ -512,6 +507,24 @@ func setupNftablesUDPNat(proxyPort uint16, excludeMark int, NFQNum uint16) {
 		Exprs: []expr.Any{
 			&expr.Meta{Key: expr.MetaKeyMARK, Register: 1},
 			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: markBytes},
+			&expr.Verdict{Kind: expr.VerdictAccept},
+		},
+	})
+
+	gidBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(gidBytes, gid)
+
+	// --- 核心修改：匹配 GID 拦截/放行逻辑 ---
+	// 1. 匹配目标 GID (比如 2000)，匹配就直接 Accept (放行，不进队列)
+	c.AddRule(&nftables.Rule{
+		Table: table,
+		Chain: chain,
+		Exprs: []expr.Any{
+			// 读取数据包对应的 Socket GID 到寄存器 1
+			&expr.Meta{Key: expr.MetaKeySKGID, Register: 1},
+			// 比较寄存器 1 是否等于我们注入的 GID
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: gidBytes},
+			// 如果相等，执行 Accept
 			&expr.Verdict{Kind: expr.VerdictAccept},
 		},
 	})

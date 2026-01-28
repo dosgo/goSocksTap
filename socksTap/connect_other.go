@@ -147,6 +147,7 @@ func isPortOwnedByPID(srcPort int, targetPid int, udp bool) bool {
 		for scanner.Scan() {
 			line := scanner.Text()
 			// 快速过滤：如果这一行不包含我们的端口，直接跳过，不用做 Fields 分割
+
 			if !strings.Contains(line, hexPortSuffix) {
 				continue
 			}
@@ -161,7 +162,6 @@ func isPortOwnedByPID(srcPort int, targetPid int, udp bool) bool {
 			if strings.HasSuffix(fields[1], hexPortSuffix) {
 				if _, ok := targetInodes[fields[9]]; ok {
 					f.Close()
-					fmt.Printf("111\r\n")
 					return true
 				}
 			}
@@ -210,20 +210,21 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 		return
 	}
 	origPort := addrInfo.DstPort
-	fmt.Printf("handleUDPData\r\n")
 	vPortKey := fmt.Sprintf("udp:%d", clientAddr.Port)
 	// 检查这个“客户端”是否已经有对应的“转发隧道”了
 	conn, ok := socksTap.udpClients.Load(vPortKey)
-	if !ok {
 
+	if !ok {
+		isExclude := false
+		if socksTap.socksServerPid != 0 {
+			isExclude = isPortOwnedByPID(int(addrInfo.SrcPort), socksTap.socksServerPid, true)
+		}
 		var proxyConn net.Conn
 		var err error
 		remoteAddr := net.JoinHostPort(clientAddr.IP.String(), strconv.Itoa(int(origPort)))
 		// 如果没有，就 Dial 一个（类似于 TCP 的 Accept 过程）
 		// 这里的 dialer 就是你之前配置的带 SO_MARK 的 socks5.Dialer
-		fmt.Printf("socksTap.socksServerPid:%d\r\n", socksTap.socksServerPid)
-		fmt.Printf("clientAddr.Port:%d\r\n", clientAddr.Port)
-		if socksTap.localSocks != "" && socksTap.socksClient != nil && !isPortBelongsToApp(int(clientAddr.Port), socksTap.socksServerPid) {
+		if socksTap.localSocks != "" && socksTap.socksClient != nil && !isExclude {
 			domain, ok := socksTap.dnsRecords.Get(clientAddr.IP.String())
 			if ok {
 				//log.Printf("domain: %s\r\n", domain)
@@ -268,25 +269,4 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 	}
 	// 像 TCP 写入一样简单
 	conn.(net.Conn).Write(data)
-}
-
-func (socksTap *SocksTap) startLocalUDPRelay() {
-	addr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("0.0.0.0:%d", socksTap.proxyPort))
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		log.Fatalf("UDP 代理监听失败: %v", err)
-	}
-	defer conn.Close()
-
-	log.Printf("UDP Relay 启动在端口: %d\n", socksTap.proxyPort)
-
-	buf := make([]byte, 1024*3)
-	for {
-		n, remoteAddr, err := conn.ReadFromUDP(buf)
-		if err != nil {
-			continue
-		}
-		// 处理每个 UDP 报文
-		socksTap.handleUDPData(conn, remoteAddr, buf[:n])
-	}
 }
