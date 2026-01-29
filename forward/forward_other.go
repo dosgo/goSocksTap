@@ -257,7 +257,7 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 }
 func modifyUDP(packet []byte, newSrcIP, newDstIP net.IP, newSrcPort, newDstPort uint16) ([]byte, error) {
 	// 解析
-	pkt := gopacket.NewPacket(packet, layers.LayerTypeIPv4, gopacket.Default)
+	pkt := gopacket.NewPacket(packet, layers.LayerTypeIPv4, gopacket.NoCopy)
 	ipLayer := pkt.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
 	udpLayer := pkt.Layer(layers.LayerTypeUDP).(*layers.UDP)
 
@@ -271,7 +271,6 @@ func modifyUDP(packet []byte, newSrcIP, newDstIP net.IP, newSrcPort, newDstPort 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
 		ComputeChecksums: true, // 核心：替代 WinDivert 的 CalcChecksums
-		FixLengths:       true,
 	}
 
 	// UDP 校验和依赖 IP 伪头部

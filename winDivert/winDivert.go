@@ -169,7 +169,7 @@ func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 				key := fmt.Sprintf("%d", dstPort)
 				if origPort, ok := originalPorts.Load(key); ok {
 					// 将包伪装成：从“真实服务器”发往“客户端原始端口”
-					comm.ModifyPacketFast(packet, dstIP, origPort.(uint16), srcIP, dstPort)
+					comm.ModifyPacketFast(packet, dstIP, origPort.(uint16), srcIP, dstPort, false)
 					// 修改为入站包，欺骗协议栈
 					addr.Flags = addr.Flags & ^uint8(0x02)
 					modifiedPacket = true
@@ -185,7 +185,7 @@ func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 						originalPorts.Store(key, dstPort)
 						//log.Printf("save key:%s->%d\r\n", key, int(dstPort))
 						// 反射逻辑：将目标 IP 改为本地，端口改为代理端口，并设为入站
-						comm.ModifyPacketFast(packet, dstIP, srcPort, srcIP, proxyPort)
+						comm.ModifyPacketFast(packet, dstIP, srcPort, srcIP, proxyPort, false)
 						//	log.Printf("srcIP:%s -> %s\r\n", dstIP, srcIP)
 						addr.Flags = addr.Flags & ^uint8(0x02)
 						modifiedPacket = true

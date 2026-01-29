@@ -62,6 +62,7 @@ func ModifyPacketFast(packet []byte, newSrcIP net.IP, newSrcPort uint16, newDstI
 	packet[ihl+1] = uint8(newSrcPort)
 	packet[ihl+2] = uint8(newDstPort >> 8)
 	packet[ihl+3] = uint8(newDstPort)
+
 }
 
 var geoCache = expirable.NewLRU[string, bool](10000, nil, time.Minute*15)
