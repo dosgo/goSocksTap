@@ -32,7 +32,7 @@ func (socksTap *SocksTap) handleConnection(c net.Conn) {
 	}
 	addrs := strings.Split(targetStr, ":")
 	isExclude := false
-	if socksTap.localSocks != "" {
+	if socksTap.localSocks != "" && strings.Index(socksTap.localSocks, "127.0.0.1") != -1 {
 		isExclude = isPortOwnedByPID(c.RemoteAddr().(*net.TCPAddr).Port, socksTap.socksServerPid, false)
 	}
 	if socksTap.localSocks != "" && socksTap.socksClient != nil && comm.IsProxyRequiredFast(addrs[0]) && !isExclude {
@@ -119,7 +119,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 
 	if !ok {
 		isExclude := false
-		if socksTap.localSocks != "" {
+		if socksTap.localSocks != "" && strings.Index(socksTap.localSocks, "127.0.0.1") != -1 {
 			isExclude = isPortOwnedByPID(int(addrInfo.SrcPort), socksTap.socksServerPid, true)
 		}
 		var proxyConn net.Conn
