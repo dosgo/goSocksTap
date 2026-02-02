@@ -43,12 +43,12 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 				log.Printf("tcp connect err: %v", err)
 				return
 			}
-			targetConn = comm.NewTimeoutConn(targetConn, time.Second*120, time.Second*120)
+			targetConn = comm.NewTimeoutConn(targetConn, time.Second*120)
 			//log.Printf("src port:%d\r\n", targetConn.LocalAddr().(*net.TCPAddr).Port)
 			defer targetConn.Close()
 			defer socksTap.originalPorts.Delete(key)
 			// 双向数据拷贝 (你可以在这里打印/记录 payload 内容)
-			localConn := comm.NewTimeoutConn(conn, time.Second*120, time.Second*120)
+			localConn := comm.NewTimeoutConn(conn, time.Second*120)
 			go func() {
 				io.Copy(targetConn, localConn)
 				localConn.Close()
@@ -119,7 +119,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 				defer socksTap.excludePorts.Delete(fmt.Sprintf("udp:%d", lport)) // 告诉 WinDivert：这个端口发的包别拦
 			}
 			resp := make([]byte, 2048)
-			timeConn := comm.NewTimeoutConn(c, time.Second*120, time.Second*120)
+			timeConn := comm.NewTimeoutConn(c, time.Second*80)
 			for {
 				rn, err := timeConn.Read(resp)
 				if err != nil {

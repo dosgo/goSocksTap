@@ -50,9 +50,9 @@ func (socksTap *SocksTap) handleConnection(c net.Conn) {
 	if err != nil {
 		return
 	}
-	targetConn = comm.NewTimeoutConn(targetConn, time.Second*120, time.Second*120)
+	targetConn = comm.NewTimeoutConn(targetConn, time.Second*120)
 	defer targetConn.Close()
-	localConn := comm.NewTimeoutConn(c, time.Second*120, time.Second*120)
+	localConn := comm.NewTimeoutConn(c, time.Second*120)
 	// 双向转发
 	go func() {
 		io.Copy(targetConn, localConn)
@@ -152,7 +152,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 			defer c.Close()
 			defer socksTap.udpClients.Delete(vPortKey)
 			resp := make([]byte, 2048)
-			timeConn := comm.NewTimeoutConn(c, time.Second*120, time.Second*120)
+			timeConn := comm.NewTimeoutConn(c, time.Second*80)
 			for {
 				rn, err := timeConn.Read(resp)
 				if err != nil {
