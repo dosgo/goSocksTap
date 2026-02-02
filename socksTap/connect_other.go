@@ -53,8 +53,9 @@ func (socksTap *SocksTap) handleConnection(c net.Conn) {
 	defer targetConn.Close()
 
 	// 双向转发
-	go io.Copy(targetConn, c)
-	io.Copy(c, targetConn)
+	timeConn := comm.NewTimeoutConn(targetConn, time.Second*120, time.Second*120)
+	go io.Copy(timeConn, c)
+	io.Copy(c, timeConn)
 }
 
 var dialer = &net.Dialer{
@@ -158,9 +159,9 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 			defer c.Close()
 			defer socksTap.udpClients.Delete(vPortKey)
 			resp := make([]byte, 2048)
+			timeConn := comm.NewTimeoutConn(c, time.Second*120, time.Second*120)
 			for {
-				c.SetReadDeadline(time.Now().Add(time.Second * 60))
-				rn, err := c.Read(resp)
+				rn, err := timeConn.Read(resp)
 				if err != nil {
 					return
 				} // 这里不需要 ReadFrom，因为它已经“连”上了

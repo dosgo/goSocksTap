@@ -37,7 +37,6 @@ func main() {
 	}
 
 	// 4. 设置读取超时并接收回包
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	answer := make([]byte, 48)
 	n, err := conn.Read(answer)
 	if err != nil {

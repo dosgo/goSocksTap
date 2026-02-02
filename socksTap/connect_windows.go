@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cakturk/go-netstat/netstat"
+	"github.com/dosgo/goSocksTap/comm"
 	"golang.org/x/sys/windows"
 )
 
@@ -53,9 +54,11 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 			defer socksTap.excludePorts.Delete(fmt.Sprintf("tcp:%d", targetConn.LocalAddr().(*net.TCPAddr).Port))
 			//log.Printf("src port:%d\r\n", targetConn.LocalAddr().(*net.TCPAddr).Port)
 			defer targetConn.Close()
+			defer socksTap.originalPorts.Delete(key)
 			// 双向数据拷贝 (你可以在这里打印/记录 payload 内容)
-			go io.Copy(targetConn, conn)
-			io.Copy(conn, targetConn)
+			timeConn := comm.NewTimeoutConn(targetConn, time.Second*120, time.Second*120)
+			go io.Copy(timeConn, conn)
+			io.Copy(conn, timeConn)
 		} else {
 			log.Printf("err addr:%s\r\n", tcpAddr.String())
 		}
@@ -127,9 +130,9 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 				defer socksTap.excludePorts.Delete(fmt.Sprintf("udp:%d", lport)) // 告诉 WinDivert：这个端口发的包别拦
 			}
 			resp := make([]byte, 2048)
+			timeConn := comm.NewTimeoutConn(c, time.Second*120, time.Second*120)
 			for {
-				c.SetReadDeadline(time.Now().Add(time.Second * 60))
-				rn, err := c.Read(resp)
+				rn, err := timeConn.Read(resp)
 				if err != nil {
 					return
 				} // 这里不需要 ReadFrom，因为它已经“连”上了
