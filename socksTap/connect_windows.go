@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/cakturk/go-netstat/netstat"
@@ -35,15 +34,8 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 				isExclude = isTcpPortOwnedByPID(int(tcpAddr.Port), socksTap.socksServerPid)
 			}
 
-			if socksTap.localSocks != "" && socksTap.socksClient != nil && !isExclude {
-				domain, ok := socksTap.dnsRecords.Get(tcpAddr.IP.String())
-				if ok {
-					//log.Printf("domain: %s\r\n", domain)
-					remoteAddr = net.JoinHostPort(strings.TrimSuffix(domain, "."), strconv.Itoa(int(origPort.(uint16))))
-				} else {
-					fmt.Printf("no domain remoteAddr:%s\r\n", remoteAddr)
-				}
-				targetConn, err = socksTap.socksClient.Dial("tcp", remoteAddr)
+			if socksTap.localSocks != "" && !isExclude {
+				targetConn, err = socksTap.connectProxy(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16))), "tcp")
 			} else {
 				targetConn, err = net.DialTimeout("tcp", remoteAddr, 5*time.Second)
 			}
@@ -51,14 +43,17 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 				log.Printf("tcp connect err: %v", err)
 				return
 			}
-			defer socksTap.excludePorts.Delete(fmt.Sprintf("tcp:%d", targetConn.LocalAddr().(*net.TCPAddr).Port))
+			targetConn = comm.NewTimeoutConn(targetConn, time.Second*120, time.Second*120)
 			//log.Printf("src port:%d\r\n", targetConn.LocalAddr().(*net.TCPAddr).Port)
 			defer targetConn.Close()
 			defer socksTap.originalPorts.Delete(key)
 			// 双向数据拷贝 (你可以在这里打印/记录 payload 内容)
-			timeConn := comm.NewTimeoutConn(targetConn, time.Second*120, time.Second*120)
-			go io.Copy(timeConn, conn)
-			io.Copy(conn, timeConn)
+			localConn := comm.NewTimeoutConn(conn, time.Second*120, time.Second*120)
+			go func() {
+				io.Copy(targetConn, localConn)
+				localConn.Close()
+			}()
+			io.Copy(localConn, targetConn)
 		} else {
 			log.Printf("err addr:%s\r\n", tcpAddr.String())
 		}
@@ -93,23 +88,16 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 
 		// 如果没有，就 Dial 一个（类似于 TCP 的 Accept 过程）
 		// 这里的 dialer 就是你之前配置的带 SO_MARK 的 socks5.Dialer
-		if socksTap.localSocks != "" && socksTap.socksClient != nil && !isExclude {
-			domain, ok := socksTap.dnsRecords.Get(clientAddr.IP.String())
-			if ok {
-				//log.Printf("domain: %s\r\n", domain)
-				remoteAddr = net.JoinHostPort(strings.TrimSuffix(domain, "."), strconv.Itoa(int(origPort)))
-				fmt.Printf("domain:%s\r\n", remoteAddr)
-			} else {
-				fmt.Printf("udp no domain remoteAddr:%s\r\n", remoteAddr)
-			}
 
-			conn, err := socksTap.socksClient.Dial("udp", remoteAddr)
+		if socksTap.localSocks != "" && !isExclude {
+			var err error
+			var tempConn net.Conn
+			tempConn, err = socksTap.connectProxy(clientAddr.IP.String(), strconv.Itoa(int(origPort)), "udp")
 			if err != nil {
 				fmt.Printf("udp err:%+v\r\n", err)
 				return
 			}
-
-			proxyConn = conn
+			proxyConn = tempConn
 
 		} else {
 			// 模拟转发（如果不走 SOCKS5，直接 NAT）：
@@ -126,6 +114,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 		go func(c net.Conn, addr *net.UDPAddr, lport uint16) {
 			defer c.Close()
 			defer socksTap.udpClients.Delete(vPortKey)
+
 			if lport != 0 {
 				defer socksTap.excludePorts.Delete(fmt.Sprintf("udp:%d", lport)) // 告诉 WinDivert：这个端口发的包别拦
 			}

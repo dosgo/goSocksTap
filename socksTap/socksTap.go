@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,7 +22,6 @@ type SocksTap struct {
 	proxyPort      uint16
 	localSocks     string
 	mode           int //0全局代理 1绕过局域网和中国大陆地址代理
-	socksClient    *socks5.Dialer
 	dnsRecords     *expirable.LRU[string, string]
 	run            bool
 	useUdpRelay    bool
@@ -50,17 +50,8 @@ func (socksTap *SocksTap) Start() {
 	socksTap.run = true
 
 	if socksTap.localSocks != "" {
-		var err error
-		socksTap.socksServerPid, err = netstat.PortGetPid(socksTap.localSocks)
+		socksTap.socksServerPid, _ = netstat.PortGetPid(socksTap.localSocks)
 		socksTap.dnsRecords = expirable.NewLRU[string, string](10000, nil, time.Minute*5)
-		socksTap.socksClient, err = socks5.NewDialer(socksTap.localSocks)
-		if err != nil {
-			log.Printf("SOCKS5 拨号失败: %v", err)
-			return
-		}
-		socksTap.socksClient.ProxyDial = func(ctx context.Context, network, address string) (net.Conn, error) {
-			return getDialer().DialContext(ctx, network, address)
-		}
 		go forward.CollectDNSRecords(socksTap.dnsRecords)
 	}
 
@@ -134,4 +125,53 @@ func (socksTap *SocksTap) startLocalUDPRelay() {
 		// 处理每个 UDP 报文
 		socksTap.handleUDPData(conn, remoteAddr, buf[:n])
 	}
+}
+
+type socksConnWrapper struct {
+	net.Conn           // 逻辑上的 UDP Conn
+	proxyConn net.Conn // 底层的 TCP 控制连接
+}
+
+func (w *socksConnWrapper) Close() error {
+	// 先关掉底层的 TCP，这会强制触发服务端释放 UDP 关联
+	if w.proxyConn != nil {
+		w.proxyConn.Close()
+	}
+	// 再关掉逻辑连接
+	return w.Conn.Close()
+}
+func (socksTap *SocksTap) connectProxy(ip string, origPort string, network string) (*socksConnWrapper, error) {
+	socksClient, err := socks5.NewDialer(socksTap.localSocks)
+	if err != nil {
+		log.Printf("SOCKS5 拨号失败: %v", err)
+		return nil, err
+	}
+	var underlyingConn net.Conn
+	socksClient.ProxyDial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		//return getDialer().DialContext(ctx, network, address)
+		c, err := getDialer().DialContext(ctx, network, address)
+		if err != nil {
+			return nil, err
+		}
+		underlyingConn = c
+		return c, nil
+	}
+
+	remoteAddr := net.JoinHostPort(ip, origPort)
+	domain, ok := socksTap.dnsRecords.Get(ip)
+	if ok {
+		remoteAddr = net.JoinHostPort(strings.TrimSuffix(domain, "."), origPort)
+		fmt.Printf("%s domain remoteAddr:%s\r\n", network, remoteAddr)
+	} else {
+		fmt.Printf("%s no domain remoteAddr:%s\r\n", network, remoteAddr)
+	}
+	targetConn, err := socksClient.DialContext(context.Background(), network, remoteAddr)
+	if err != nil {
+		underlyingConn.Close()
+		return nil, err
+	}
+	return &socksConnWrapper{
+		Conn:      targetConn,
+		proxyConn: underlyingConn,
+	}, nil
 }

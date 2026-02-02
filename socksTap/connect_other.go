@@ -35,7 +35,7 @@ func (socksTap *SocksTap) handleConnection(c net.Conn) {
 	if socksTap.localSocks != "" && strings.Index(socksTap.localSocks, "127.0.0.1") != -1 {
 		isExclude = isPortOwnedByPID(c.RemoteAddr().(*net.TCPAddr).Port, socksTap.socksServerPid, false)
 	}
-	if socksTap.localSocks != "" && socksTap.socksClient != nil && comm.IsProxyRequiredFast(addrs[0]) && !isExclude {
+	if socksTap.localSocks != "" && comm.IsProxyRequiredFast(addrs[0]) && !isExclude {
 		domain, ok := socksTap.dnsRecords.Get(addrs[0])
 		if ok {
 			log.Printf("domain: %s\r\n", domain)
@@ -43,19 +43,22 @@ func (socksTap *SocksTap) handleConnection(c net.Conn) {
 		} else {
 			fmt.Printf("no domain remoteAddr:%s\r\n", targetStr)
 		}
-		targetConn, err = socksTap.socksClient.Dial("tcp", targetStr)
+		targetConn, err = socksTap.connectProxy(addrs[0], addrs[1], "tcp")
 	} else {
 		targetConn, err = dialer.Dial("tcp", targetStr)
 	}
 	if err != nil {
 		return
 	}
+	targetConn = comm.NewTimeoutConn(targetConn, time.Second*120, time.Second*120)
 	defer targetConn.Close()
-
+	localConn := comm.NewTimeoutConn(c, time.Second*120, time.Second*120)
 	// 双向转发
-	timeConn := comm.NewTimeoutConn(targetConn, time.Second*120, time.Second*120)
-	go io.Copy(timeConn, c)
-	io.Copy(c, timeConn)
+	go func() {
+		io.Copy(targetConn, localConn)
+		localConn.Close()
+	}()
+	io.Copy(localConn, targetConn)
 }
 
 var dialer = &net.Dialer{
@@ -128,23 +131,13 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 		remoteAddr := net.JoinHostPort(clientAddr.IP.String(), strconv.Itoa(int(origPort)))
 		// 如果没有，就 Dial 一个（类似于 TCP 的 Accept 过程）
 		// 这里的 dialer 就是你之前配置的带 SO_MARK 的 socks5.Dialer
-		if socksTap.localSocks != "" && socksTap.socksClient != nil && comm.IsProxyRequiredFast(clientAddr.IP.String()) && !isExclude {
-			domain, ok := socksTap.dnsRecords.Get(clientAddr.IP.String())
-			if ok {
-				//log.Printf("domain: %s\r\n", domain)
-				remoteAddr = net.JoinHostPort(strings.TrimSuffix(domain, "."), strconv.Itoa(int(origPort)))
-				fmt.Printf("domain:%s\r\n", remoteAddr)
-			} else {
-				fmt.Printf("udp no domain remoteAddr:%s\r\n", remoteAddr)
-			}
-
-			conn, err := socksTap.socksClient.Dial("udp", remoteAddr)
+		if socksTap.localSocks != "" && comm.IsProxyRequiredFast(clientAddr.IP.String()) && !isExclude {
+			udpConn, err := socksTap.connectProxy(clientAddr.IP.String(), strconv.Itoa(int(origPort)), "udp")
 			if err != nil {
 				fmt.Printf("udp err:%+v\r\n", err)
 				return
 			}
-
-			proxyConn = conn
+			proxyConn = udpConn
 
 		} else {
 			// 模拟转发（如果不走 SOCKS5，直接 NAT）：
