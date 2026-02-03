@@ -75,33 +75,16 @@ type winDialer struct {
 func (d *winDialer) Dial(network, address string) (net.Conn, error) {
 	return d.DialContext(context.Background(), network, address)
 }
-func (d *winDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
-	var domain, typ, proto int
-	switch network {
-	case "tcp", "tcp4":
-		domain, typ, proto = syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_TCP
-	case "udp", "udp4":
-		domain, typ, proto = syscall.AF_INET, syscall.SOCK_DGRAM, syscall.IPPROTO_UDP
-	default:
-		return nil, net.UnknownNetworkError(network)
-	}
 
+func (d *winDialer) dialTcp(address string) (net.Conn, error) {
+	domain, typ, proto := syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_TCP
 	// 1. 解析远程地址
 	var rsa syscall.Sockaddr
-	if strings.Index(network, "tcp") != -1 {
-		ra, err := net.ResolveTCPAddr("tcp", address) // 借用 TCPAddr 结构解析 IP 和 Port
-		if err != nil {
-			return nil, fmt.Errorf("ResolveTCPAddr: %w", err)
-		}
-		rsa = &syscall.SockaddrInet4{Port: ra.Port, Addr: [4]byte(ra.IP.To4())}
-	} else {
-		ra, err := net.ResolveUDPAddr("udp", address) // 借用 TCPAddr 结构解析 IP 和 Port
-		if err != nil {
-			return nil, fmt.Errorf("ResolveTCPAddr: %w", err)
-		}
-		rsa = &syscall.SockaddrInet4{Port: ra.Port, Addr: [4]byte(ra.IP.To4())}
+	ra, err := net.ResolveTCPAddr("tcp", address) // 借用 TCPAddr 结构解析 IP 和 Port
+	if err != nil {
+		return nil, fmt.Errorf("ResolveTCPAddr: %w", err)
 	}
-
+	rsa = &syscall.SockaddrInet4{Port: ra.Port, Addr: [4]byte(ra.IP.To4())}
 	// 2. 建立原生 Socket
 	fd, err := syscall.Socket(domain, typ, proto)
 	if err != nil {
@@ -114,25 +97,42 @@ func (d *winDialer) DialContext(ctx context.Context, network, address string) (n
 		syscall.Closesocket(h)
 		return nil, fmt.Errorf("Bind: %w", err)
 	}
-
 	// 4. 获取分配到的端口并回调记录
 	if sa, err := syscall.Getsockname(h); err == nil {
-		d.socksTap.excludePorts.Store(fmt.Sprintf("%s:%d", network, sa.(*syscall.SockaddrInet4).Port), 1)
+		d.socksTap.excludePorts.Store(fmt.Sprintf("tcp:%d", sa.(*syscall.SockaddrInet4).Port), 1)
 	}
 
 	if err := syscall.Connect(h, rsa); err != nil {
 		syscall.Closesocket(h)
 		return nil, fmt.Errorf("Connect: %w", err)
 	}
-
 	// 6. 包装成 net.Conn
 	file := os.NewFile(uintptr(h), "socket")
 	//defer file.Close()
 	return net.FileConn(file)
 }
 
+func (d *winDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	if strings.Contains(network, "tcp") {
+		//tcp连接有握手包必须在bind就添加端口
+		return d.dialTcp(address)
+	} else {
+		conn, err := d.Dialer.Dial(network, address)
+		if err == nil {
+			lAddr := conn.LocalAddr().(*net.UDPAddr)
+			d.socksTap.excludePorts.Store(fmt.Sprintf("udp:%d", lAddr.Port), time.Now().Unix()) // 告诉 WinDivert
+		}
+		return conn, err
+	}
+}
+
+var _winDialer *winDialer
+
 func getDialer(_socksTap *SocksTap) *winDialer {
-	return &winDialer{socksTap: _socksTap}
+	if _winDialer == nil {
+		_winDialer = &winDialer{socksTap: _socksTap}
+	}
+	return _winDialer
 }
 
 func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.UDPAddr, data []byte) {
