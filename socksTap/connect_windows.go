@@ -4,12 +4,15 @@
 package socksTap
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
 	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/cakturk/go-netstat/netstat"
@@ -37,10 +40,14 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 			if socksTap.localSocks != "" && !isExclude {
 				targetConn, err = socksTap.connectProxy(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16))), "tcp")
 			} else {
-				targetConn, err = net.DialTimeout("tcp", remoteAddr, 5*time.Second)
+				targetConn, err = getDialer(socksTap).Dial("tcp", remoteAddr)
+				if err == nil {
+					lAddr := targetConn.LocalAddr().(*net.TCPAddr)
+					defer socksTap.excludePorts.Delete(fmt.Sprintf("tcp:%d", uint16(lAddr.Port)))
+				}
 			}
 			if err != nil || targetConn == nil {
-				log.Printf("tcp connect err: %v", err)
+				log.Printf("tcp connect err: %v host:%s", err, remoteAddr)
 				return
 			}
 			targetConn = comm.NewTimeoutConn(targetConn, time.Second*120)
@@ -59,8 +66,73 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 		}
 	}
 }
-func getDialer() *net.Dialer {
-	return &net.Dialer{}
+
+type winDialer struct {
+	net.Dialer
+	socksTap *SocksTap
+}
+
+func (d *winDialer) Dial(network, address string) (net.Conn, error) {
+	return d.DialContext(context.Background(), network, address)
+}
+func (d *winDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	var domain, typ, proto int
+	switch network {
+	case "tcp", "tcp4":
+		domain, typ, proto = syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_TCP
+	case "udp", "udp4":
+		domain, typ, proto = syscall.AF_INET, syscall.SOCK_DGRAM, syscall.IPPROTO_UDP
+	default:
+		return nil, net.UnknownNetworkError(network)
+	}
+
+	// 1. 解析远程地址
+	var rsa syscall.Sockaddr
+	if strings.Index(network, "tcp") != -1 {
+		ra, err := net.ResolveTCPAddr("tcp", address) // 借用 TCPAddr 结构解析 IP 和 Port
+		if err != nil {
+			return nil, fmt.Errorf("ResolveTCPAddr: %w", err)
+		}
+		rsa = &syscall.SockaddrInet4{Port: ra.Port, Addr: [4]byte(ra.IP.To4())}
+	} else {
+		ra, err := net.ResolveUDPAddr("udp", address) // 借用 TCPAddr 结构解析 IP 和 Port
+		if err != nil {
+			return nil, fmt.Errorf("ResolveTCPAddr: %w", err)
+		}
+		rsa = &syscall.SockaddrInet4{Port: ra.Port, Addr: [4]byte(ra.IP.To4())}
+	}
+
+	// 2. 建立原生 Socket
+	fd, err := syscall.Socket(domain, typ, proto)
+	if err != nil {
+		return nil, err
+	}
+	h := syscall.Handle(fd)
+
+	// 3. 核心：显式 Bind 触发端口分配，但不调用 Listen
+	if err := syscall.Bind(h, &syscall.SockaddrInet4{Port: 0}); err != nil {
+		syscall.Closesocket(h)
+		return nil, fmt.Errorf("Bind: %w", err)
+	}
+
+	// 4. 获取分配到的端口并回调记录
+	if sa, err := syscall.Getsockname(h); err == nil {
+		d.socksTap.excludePorts.Store(fmt.Sprintf("%s:%d", network, sa.(*syscall.SockaddrInet4).Port), 1)
+	}
+
+	if err := syscall.Connect(h, rsa); err != nil {
+		syscall.Closesocket(h)
+		return nil, fmt.Errorf("Connect: %w", err)
+	}
+
+	// 6. 包装成 net.Conn
+	file := os.NewFile(uintptr(h), "socket")
+	//defer file.Close()
+	return net.FileConn(file)
+}
+
+func getDialer(_socksTap *SocksTap) *winDialer {
+	return &winDialer{socksTap: _socksTap}
 }
 
 func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.UDPAddr, data []byte) {
@@ -86,29 +158,29 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 			isExclude = isUdpPortOwnedByPID(int(addrInfo.SrcPort), socksTap.socksServerPid)
 		}
 
-		// 如果没有，就 Dial 一个（类似于 TCP 的 Accept 过程）
-		// 这里的 dialer 就是你之前配置的带 SO_MARK 的 socks5.Dialer
-
 		if socksTap.localSocks != "" && !isExclude {
 			var err error
 			var tempConn net.Conn
 			tempConn, err = socksTap.connectProxy(clientAddr.IP.String(), strconv.Itoa(int(origPort)), "udp")
 			if err != nil {
-				fmt.Printf("udp err:%+v\r\n", err)
+				fmt.Printf("udp err:%+v host:%s\r\n", err, remoteAddr)
 				return
 			}
 			proxyConn = tempConn
 
 		} else {
 			// 模拟转发（如果不走 SOCKS5，直接 NAT）：
-			remoteUdpAddr, err := net.ResolveUDPAddr("udp", remoteAddr)
+			var err error
+			proxyConn, err = getDialer(socksTap).Dial("udp", remoteAddr)
 			if err != nil {
 				return
 			}
-			proxyConn, err = net.DialUDP("udp", nil, remoteUdpAddr)
-			lAddr := proxyConn.LocalAddr().(*net.UDPAddr)
-			socksTap.excludePorts.Store(fmt.Sprintf("udp:%d", lAddr.Port), time.Now().Unix()) // 告诉 WinDivert：这个端口发的包别拦
-			lPort = uint16(lAddr.Port)
+
+			_, portStr, err := net.SplitHostPort(proxyConn.LocalAddr().String())
+			if err == nil {
+				p, _ := strconv.Atoi(portStr)
+				lPort = uint16(p)
+			}
 		}
 		// 启动一个协程专门负责这个“连接”的回包（像 TCP 处理一样）
 		go func(c net.Conn, addr *net.UDPAddr, lport uint16) {

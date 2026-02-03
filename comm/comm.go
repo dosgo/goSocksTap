@@ -65,7 +65,7 @@ func ModifyPacketFast(packet []byte, newSrcIP net.IP, newSrcPort uint16, newDstI
 
 }
 
-var geoCache = expirable.NewLRU[string, bool](10000, nil, time.Minute*15)
+var geoCache = expirable.NewLRU[string, bool](2000, nil, time.Minute*15)
 var proxyMode = 0
 
 func SetProxyMode(mode int) {

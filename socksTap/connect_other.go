@@ -73,7 +73,7 @@ var dialer = &net.Dialer{
 		})
 	}}
 
-func getDialer() *net.Dialer {
+func getDialer(socksTap *SocksTap) *net.Dialer {
 	return dialer
 }
 
@@ -226,6 +226,5 @@ func isPortOwnedByPID(srcPort int, targetPid int, udp bool) bool {
 			}
 		}
 	}
-
 	return false
 }

@@ -106,10 +106,6 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 	}
 }
 
-func NetEvent(pid int, excludePorts *sync.Map) {
-
-}
-
 func ForceRestartWithGID(pid int) (int, error) {
 
 	// 1. 获取原进程的 Uid、路径、参数、环境变量、工作目录
@@ -232,7 +228,6 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 			vPort := udpNat.GetVirtualPort(srcPort, dstIP, dstPort)
 			//localIP := getLocalIP()
 			modified, err := modifyUDP(packet, dstIP, srcIP, vPort, uint16(proxyPort))
-
 			if err == nil {
 				nf.SetVerdictWithOption(packetID, nfqueue.NfAccept, nfqueue.WithAlteredPacket(modified))
 				return 0
@@ -287,9 +282,6 @@ func modifyUDP(packet []byte, newSrcIP, newDstIP net.IP, newSrcPort, newDstPort 
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-func CloseNetEvent() {
-
 }
 
 func CloseWinDivert() {

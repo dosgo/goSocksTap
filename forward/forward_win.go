@@ -15,20 +15,12 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 	winDivert.CollectDNSRecords(dnsRecords)
 }
 
-func NetEvent(pid int, excludePorts *sync.Map) {
-	winDivert.NetEvent(pid, excludePorts)
-}
-
 func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map) {
 	winDivert.RedirectAllTCP(proxyPort, excludePorts, originalPorts)
 }
 
 func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map, udpNat *udpProxy.UdpNat) {
 	winDivert.RedirectAllUDP(proxyPort, excludePorts, originalPorts, udpNat)
-}
-
-func CloseNetEvent() {
-	winDivert.CloseNetEvent()
 }
 
 func CloseWinDivert() {

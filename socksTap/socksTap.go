@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -58,7 +57,6 @@ func (socksTap *SocksTap) Start() {
 	go socksTap.task()
 	// 1. 启动本地代理中转服务器
 	go socksTap.startLocalRelay()
-	go forward.NetEvent(socksTap.socksServerPid, socksTap.excludePorts)
 	// 2. 开启 WinDivert 拦截并重定向所有 TCP 流量
 	go forward.RedirectAllTCP(socksTap.proxyPort, socksTap.excludePorts, socksTap.originalPorts)
 	if socksTap.useUdpRelay {
@@ -79,11 +77,11 @@ func (socksTap *SocksTap) task() {
 			pid, err := netstat.PortGetPid(socksTap.localSocks)
 			if err == nil && pid > 0 && pid != socksTap.socksServerPid {
 				socksTap.socksServerPid = pid
-				if runtime.GOOS == "windows" {
-					forward.CloseNetEvent()
-					time.Sleep(time.Second * 1)
-					go forward.NetEvent(socksTap.socksServerPid, socksTap.excludePorts)
-				}
+				/*
+					bindPorts, _ := netstat.GetTcpBindList(pid, true)
+					for _, v := range bindPorts {
+						socksTap.excludePorts.Store(fmt.Sprintf("tcp:%d", v), 1)
+					}*/
 			}
 		}
 		time.Sleep(time.Second * 30)
@@ -149,7 +147,7 @@ func (socksTap *SocksTap) connectProxy(ip string, origPort string, network strin
 	var underlyingConn net.Conn
 	socksClient.ProxyDial = func(ctx context.Context, network, address string) (net.Conn, error) {
 		//return getDialer().DialContext(ctx, network, address)
-		c, err := getDialer().DialContext(ctx, network, address)
+		c, err := getDialer(socksTap).DialContext(ctx, network, address)
 		if err != nil {
 			return nil, err
 		}
@@ -161,13 +159,15 @@ func (socksTap *SocksTap) connectProxy(ip string, origPort string, network strin
 	domain, ok := socksTap.dnsRecords.Get(ip)
 	if ok {
 		remoteAddr = net.JoinHostPort(strings.TrimSuffix(domain, "."), origPort)
-		fmt.Printf("%s domain remoteAddr:%s\r\n", network, remoteAddr)
+		fmt.Printf("proxy %s domain remoteAddr:%s\r\n", network, remoteAddr)
 	} else {
-		fmt.Printf("%s no domain remoteAddr:%s\r\n", network, remoteAddr)
+		fmt.Printf("proxy %s no domain remoteAddr:%s\r\n", network, remoteAddr)
 	}
 	targetConn, err := socksClient.DialContext(context.Background(), network, remoteAddr)
 	if err != nil {
-		underlyingConn.Close()
+		if underlyingConn != nil {
+			underlyingConn.Close()
+		}
 		return nil, err
 	}
 	return &socksConnWrapper{
