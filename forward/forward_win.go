@@ -4,7 +4,9 @@
 package forward
 
 import (
+	"fmt"
 	"sync"
+	"syscall"
 
 	"github.com/dosgo/goSocksTap/comm/udpProxy"
 	"github.com/dosgo/goSocksTap/winDivert"
@@ -12,6 +14,7 @@ import (
 )
 
 func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
+	flushWithAPI()
 	winDivert.CollectDNSRecords(dnsRecords)
 }
 
@@ -28,4 +31,15 @@ func CloseWinDivert() {
 }
 func ForceRestartWithGID(pid int) (int, error) {
 	return 0, nil
+}
+func flushWithAPI() error {
+	dnsapi := syscall.NewLazyDLL("dnsapi.dll")
+	proc := dnsapi.NewProc("DnsFlushResolverCache")
+
+	r1, _, err := proc.Call()
+	if r1 == 0 {
+		return fmt.Errorf("API call failed: %v", err)
+	}
+
+	return nil
 }
