@@ -139,7 +139,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 
 	addrInfo := socksTap.udpNat.GetAddrFromVirtualPort(uint16(clientAddr.Port))
 	if addrInfo == nil {
-		fmt.Printf("no origPort clientAddr.Port:%d\r\n", clientAddr.Port)
+		log.Printf("no origPort clientAddr.Port:%d\r\n", clientAddr.Port)
 		return
 	}
 	origPort := addrInfo.DstPort
@@ -163,7 +163,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 			var tempConn net.Conn
 			tempConn, err = socksTap.connectProxy(clientAddr.IP.String(), strconv.Itoa(int(origPort)), "udp")
 			if err != nil {
-				fmt.Printf("udp err:%+v host:%s\r\n", err, remoteAddr)
+				log.Printf("udp err:%+v host:%s\r\n", err, remoteAddr)
 				return
 			}
 			proxyConn = tempConn

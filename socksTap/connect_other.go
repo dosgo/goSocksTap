@@ -41,7 +41,7 @@ func (socksTap *SocksTap) handleConnection(c net.Conn) {
 			log.Printf("domain: %s\r\n", domain)
 			targetStr = net.JoinHostPort(strings.TrimSuffix(domain, "."), addrs[1])
 		} else {
-			fmt.Printf("no domain remoteAddr:%s\r\n", targetStr)
+			log.Printf("no domain remoteAddr:%s\r\n", targetStr)
 		}
 		targetConn, err = socksTap.connectProxy(addrs[0], addrs[1], "tcp")
 	} else {
@@ -113,7 +113,7 @@ func getOriginalDst(conn net.Conn) (string, error) {
 func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.UDPAddr, data []byte) {
 	addrInfo := socksTap.udpNat.GetAddrFromVirtualPort(uint16(clientAddr.Port))
 	if addrInfo == nil {
-		fmt.Printf("no origPort clientAddr.Port:%d\r\n", clientAddr.Port)
+		log.Printf("no origPort clientAddr.Port:%d\r\n", clientAddr.Port)
 		return
 	}
 	origPort := addrInfo.DstPort
@@ -134,7 +134,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 		if socksTap.localSocks != "" && comm.IsProxyRequiredFast(clientAddr.IP.String()) && !isExclude {
 			udpConn, err := socksTap.connectProxy(clientAddr.IP.String(), strconv.Itoa(int(origPort)), "udp")
 			if err != nil {
-				fmt.Printf("udp err:%+v\r\n", err)
+				log.Printf("udp err:%+v\r\n", err)
 				return
 			}
 			proxyConn = udpConn
@@ -143,7 +143,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 			// 模拟转发（如果不走 SOCKS5，直接 NAT）：
 			proxyConn, err = dialer.Dial("udp", remoteAddr)
 			if err != nil {
-				fmt.Printf("udp err:%+v\r\n", err)
+				log.Printf("udp err:%+v\r\n", err)
 				return
 			}
 		}

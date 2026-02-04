@@ -100,7 +100,7 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 			if answer.Type == layers.DNSTypeA {
 				ip := answer.IP.String()
 				dnsRecords.Add(ip, name)
-				//fmt.Printf("捕获成功: %s -> %s\n", name, ip)
+				//log.Printf("捕获成功: %s -> %s\n", name, ip)
 			}
 		}
 	}
@@ -147,7 +147,7 @@ func ForceRestartWithGID(pid int) (int, error) {
 		Setsid: true, // 让它在后台独立运行
 	}
 
-	fmt.Printf("[*] 正在重启 PID %d: %s (UID: %d, GID: %d)\n", pid, exe, originalUid, gid)
+	log.Printf("[*] 正在重启 PID %d: %s (UID: %d, GID: %d)\n", pid, exe, originalUid, gid)
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("启动新进程失败: %v", err)
 	}
@@ -183,13 +183,13 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 
 	nf, err := nfqueue.Open(&config)
 	if err != nil {
-		fmt.Println("could not open nfqueue socket:", err)
+		log.Println("could not open nfqueue socket:", err)
 		return
 	}
 
 	// Avoid receiving ENOBUFS errors.
 	if err := nf.SetOption(netlink.NoENOBUFS, true); err != nil {
-		fmt.Printf("failed to set netlink option %v: %v\n",
+		log.Printf("failed to set netlink option %v: %v\n",
 			netlink.NoENOBUFS, err)
 		return
 	}
@@ -241,11 +241,11 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 
 	// Register your function to listen on nflqueue queue 100
 	err = nf.RegisterWithErrorFunc(context.Background(), fn, func(e error) int {
-		fmt.Println(err)
+		log.Println(err)
 		return -1
 	})
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 

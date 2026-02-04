@@ -166,9 +166,9 @@ func (socksTap *SocksTap) connectProxy(ip string, origPort string, network strin
 	domain, ok := socksTap.dnsRecords.Get(ip)
 	if ok {
 		remoteAddr = net.JoinHostPort(strings.TrimSuffix(domain, "."), origPort)
-		fmt.Printf("proxy %s domain remoteAddr:%s\r\n", network, remoteAddr)
+		log.Printf("proxy %s domain remoteAddr:%s\r\n", network, remoteAddr)
 	} else {
-		fmt.Printf("proxy %s no domain remoteAddr:%s\r\n", network, remoteAddr)
+		log.Printf("proxy %s no domain remoteAddr:%s\r\n", network, remoteAddr)
 	}
 	targetConn, err := socksClient.DialContext(context.Background(), network, remoteAddr)
 	if err != nil {

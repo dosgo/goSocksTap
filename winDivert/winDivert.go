@@ -146,8 +146,6 @@ func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 	}
 	defer tcpDivert.Close()
 
-	log.Printf("全端口透明代理已启动...\n, 代理端口: %d\n", proxyPort)
-
 	var addr divert.Address
 	buf := make([]byte, 1024*10)
 	var modifiedPacket bool
@@ -259,7 +257,7 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 				addrInfo := udpNat.GetAddrFromVirtualPort(virtualPort)
 				if addrInfo != nil {
 					comm.ModifyPacketFast(packet, addrInfo.DstIP, addrInfo.DstPort, srcIP, addrInfo.SrcPort)
-					//	fmt.Printf("dstIp:%s srcIP:%s\r\n", dstIP.String(), srcIP.String())
+					//	log.Printf("dstIp:%s srcIP:%s\r\n", dstIP.String(), srcIP.String())
 					addr.Flags = addr.Flags & ^uint8(0x02) // 设为入站
 					divert.CalcChecksums(packet, &addr, 0)
 					udpDivert.Send(packet, &addr)
