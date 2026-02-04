@@ -101,7 +101,6 @@ func NetEvent(pid int, excludePorts *sync.Map) {
 			excludePorts.Store(fmt.Sprintf("tcp:%d", v), 1)
 		}
 	}
-
 	var filter = fmt.Sprintf("processId=%d or processId=%d", os.Getpid(), pid)
 	var err error
 	eventDivert, err = divert.Open(filter, divert.LayerSocket, divert.PriorityDefault, divert.FlagSniff|divert.FlagRecvOnly)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/dosgo/goSocksTap/comm/udpProxy"
 	"github.com/dosgo/goSocksTap/winDivert"
@@ -26,7 +27,7 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 	winDivert.RedirectAllUDP(proxyPort, excludePorts, originalPorts, udpNat)
 }
 
-func CloseWinDivert() {
+func Stop() {
 	winDivert.CloseWinDivert()
 }
 func ForceRestartWithGID(pid int) (int, error) {
@@ -35,11 +36,15 @@ func ForceRestartWithGID(pid int) (int, error) {
 func flushWithAPI() error {
 	dnsapi := syscall.NewLazyDLL("dnsapi.dll")
 	proc := dnsapi.NewProc("DnsFlushResolverCache")
-
 	r1, _, err := proc.Call()
 	if r1 == 0 {
 		return fmt.Errorf("API call failed: %v", err)
 	}
-
 	return nil
+}
+
+func CheckUpdate(pid int, excludePorts *sync.Map) {
+	winDivert.CloseNetEvent()
+	time.Sleep(time.Millisecond * 2)
+	go winDivert.NetEvent(pid, excludePorts)
 }

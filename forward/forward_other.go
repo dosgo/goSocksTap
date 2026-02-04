@@ -284,7 +284,7 @@ func modifyUDP(packet []byte, newSrcIP, newDstIP net.IP, newSrcPort, newDstPort 
 	return buf.Bytes(), nil
 }
 
-func CloseWinDivert() {
+func Stop() {
 	cleanupNftables("my_proxy_tcp")
 	cleanupNftables("my_proxy_udp")
 }
@@ -549,4 +549,7 @@ func setupNftablesUDPNat(proxyPort uint16, excludeMark int, NFQNum uint16) {
 	if err := c.Flush(); err != nil {
 		log.Fatalf("Flush 失败: %v", err)
 	}
+}
+func CheckUpdate(pid int, excludePorts *sync.Map) {
+
 }

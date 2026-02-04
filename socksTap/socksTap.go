@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +18,14 @@ import (
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/wzshiming/socks5"
 )
+
+var randPorts = []uint16{
+	1111,
+	1112,
+	1113,
+	1114,
+	1115,
+}
 
 type SocksTap struct {
 	proxyPort      uint16
@@ -31,10 +41,9 @@ type SocksTap struct {
 	socksServerPid int
 }
 
-func NewSocksTap(proxyPort uint16, localSocks string, mode int, useUdpRelay bool) *SocksTap {
+func NewSocksTap(localSocks string, mode int, useUdpRelay bool) *SocksTap {
 	comm.SetProxyMode(mode)
 	info := &SocksTap{
-		proxyPort:   proxyPort,
 		localSocks:  localSocks,
 		mode:        mode,
 		useUdpRelay: useUdpRelay,
@@ -47,17 +56,17 @@ func NewSocksTap(proxyPort uint16, localSocks string, mode int, useUdpRelay bool
 
 func (socksTap *SocksTap) Start() {
 	socksTap.run = true
-
+	//随机端口
+	socksTap.proxyPort = randPorts[rand.Intn(len(randPorts))]
+	// 1. 启动本地代理中转服务器
+	go socksTap.startLocalRelay()
+	go socksTap.task()
+	time.Sleep(time.Millisecond * 20)
 	if socksTap.localSocks != "" {
-		socksTap.socksServerPid, _ = netstat.PortGetPid(socksTap.localSocks)
 		socksTap.dnsRecords = expirable.NewLRU[string, string](10000, nil, time.Minute*5)
 		go forward.CollectDNSRecords(socksTap.dnsRecords)
 	}
 
-	go socksTap.task()
-	// 1. 启动本地代理中转服务器
-	go socksTap.startLocalRelay()
-	// 2. 开启 WinDivert 拦截并重定向所有 TCP 流量
 	go forward.RedirectAllTCP(socksTap.proxyPort, socksTap.excludePorts, socksTap.originalPorts)
 	if socksTap.useUdpRelay {
 		socksTap.udpNat = udpProxy.NewUdpNat()
@@ -68,7 +77,7 @@ func (socksTap *SocksTap) Start() {
 }
 func (socksTap *SocksTap) Close() {
 	socksTap.run = false
-	forward.CloseWinDivert()
+	forward.Stop()
 }
 
 func (socksTap *SocksTap) task() {
@@ -77,11 +86,9 @@ func (socksTap *SocksTap) task() {
 			pid, err := netstat.PortGetPid(socksTap.localSocks)
 			if err == nil && pid > 0 && pid != socksTap.socksServerPid {
 				socksTap.socksServerPid = pid
-				/*
-					bindPorts, _ := netstat.GetTcpBindList(pid, true)
-					for _, v := range bindPorts {
-						socksTap.excludePorts.Store(fmt.Sprintf("tcp:%d", v), 1)
-					}*/
+				if runtime.GOOS == "windows" {
+					forward.CheckUpdate(socksTap.socksServerPid, socksTap.excludePorts)
+				}
 			}
 		}
 		time.Sleep(time.Second * 30)
@@ -94,7 +101,7 @@ func (socksTap *SocksTap) startLocalRelay() {
 	if err != nil {
 		log.Fatalf("代理监听失败: %v", err)
 	}
-	log.Printf("startLocalRelay\r\n")
+	log.Printf("startLocalRelay:%d\r\n", socksTap.proxyPort)
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
