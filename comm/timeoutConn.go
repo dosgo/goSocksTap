@@ -22,5 +22,7 @@ func NewTimeoutConn(conn net.Conn, readTimeout time.Duration) *TimeoutConn {
 func (c *TimeoutConn) Read(b []byte) (int, error) {
 	deadline := time.Now().Add(c.readTimeout)
 	c.Conn.SetReadDeadline(deadline)
-	return c.Conn.Read(b)
+	n, err := c.Conn.Read(b)
+	c.Conn.SetReadDeadline(time.Time{})
+	return n, err
 }
