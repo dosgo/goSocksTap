@@ -82,7 +82,7 @@ func IsProxyRequiredFast(ipStr string) bool {
 		return false
 	}
 	// IsPrivate 涵盖了 RFC 1918 (IPv4) 和 RFC 4193 (IPv6)
-	if addr.IsPrivate() {
+	if addr.IsPrivate() || addr.IsLinkLocalUnicast() {
 		return false
 	}
 

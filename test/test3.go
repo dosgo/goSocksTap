@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	socksTap := socksTap.NewSocksTap("socks5://127.0.0.1:10801", 1, true)
+	socksTap := socksTap.NewSocksTap("socks5://127.0.0.1:10808", 1, true)
 	socksTap.Start()
 	defer socksTap.Close()
 
