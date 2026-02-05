@@ -28,17 +28,19 @@ var randPorts = []uint16{
 }
 
 type SocksTap struct {
-	proxyPort      uint16
-	localSocks     string
-	mode           int //0全局代理 1绕过局域网和中国大陆地址代理
-	dnsRecords     *expirable.LRU[string, string]
-	run            bool
-	useUdpRelay    bool
-	udpClients     *sync.Map
-	excludePorts   *sync.Map
-	originalPorts  *sync.Map
-	udpNat         *udpProxy.UdpNat
-	socksServerPid int
+	proxyPort   uint16
+	localSocks  string
+	mode        int //0全局代理 1绕过局域网和中国大陆地址代理
+	dnsRecords  *expirable.LRU[string, string]
+	run         bool
+	useUdpRelay bool
+	udpClients  *sync.Map
+	//excludePorts    *sync.Map
+	udpExcludePorts *comm.PortBitmap
+	tcpExcludePorts *comm.PortBitmap
+	originalPorts   *sync.Map
+	udpNat          *udpProxy.UdpNat
+	socksServerPid  int
 }
 
 func NewSocksTap(localSocks string, mode int, useUdpRelay bool) *SocksTap {
@@ -49,7 +51,8 @@ func NewSocksTap(localSocks string, mode int, useUdpRelay bool) *SocksTap {
 		useUdpRelay: useUdpRelay,
 	}
 	info.udpClients = &sync.Map{}
-	info.excludePorts = &sync.Map{}
+	info.tcpExcludePorts = &comm.PortBitmap{}
+	info.udpExcludePorts = &comm.PortBitmap{}
 	info.originalPorts = &sync.Map{}
 	return info
 }
@@ -67,12 +70,12 @@ func (socksTap *SocksTap) Start() {
 		go forward.CollectDNSRecords(socksTap.dnsRecords)
 	}
 
-	go forward.RedirectAllTCP(socksTap.proxyPort, socksTap.excludePorts, socksTap.originalPorts)
+	go forward.RedirectAllTCP(socksTap.proxyPort, socksTap.tcpExcludePorts, socksTap.originalPorts)
 	if socksTap.useUdpRelay {
 		socksTap.udpNat = udpProxy.NewUdpNat()
 		go socksTap.startLocalUDPRelay()
 		// 开启 WinDivert UDP 拦截
-		go forward.RedirectAllUDP(socksTap.proxyPort, socksTap.excludePorts, socksTap.originalPorts, socksTap.udpNat)
+		go forward.RedirectAllUDP(socksTap.proxyPort, socksTap.udpExcludePorts, socksTap.originalPorts, socksTap.udpNat)
 	}
 }
 func (socksTap *SocksTap) Close() {
@@ -87,7 +90,7 @@ func (socksTap *SocksTap) task() {
 			if err == nil && pid > 0 && pid != socksTap.socksServerPid {
 				socksTap.socksServerPid = pid
 				if runtime.GOOS == "windows" {
-					forward.CheckUpdate(socksTap.socksServerPid, socksTap.excludePorts)
+					forward.CheckUpdate(socksTap.socksServerPid, socksTap.tcpExcludePorts)
 				}
 			}
 		}

@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dosgo/goSocksTap/comm"
 	"github.com/dosgo/goSocksTap/comm/udpProxy"
 	nfqueue "github.com/florianl/go-nfqueue/v2"
 	"github.com/google/gopacket"
@@ -162,13 +163,13 @@ func ForceRestartWithGID(pid int) (int, error) {
 var mark int = 0x1aa
 var gid uint32 = 2000
 
-func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map) {
+func RedirectAllTCP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *sync.Map) {
 	cleanupNftables("my_proxy_tcp")
 	cleanupNftables("my_transparent_proxy")
 	setupNftables("matchNet", uint16(proxyPort), mark)
 }
 
-func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map, udpNat *udpProxy.UdpNat) {
+func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *sync.Map, udpNat *udpProxy.UdpNat) {
 	cleanupNftables("my_proxy_udp")
 	var nfnum uint16 = 100
 	setupNftablesUDPNat(uint16(proxyPort), mark, nfnum)
@@ -550,6 +551,6 @@ func setupNftablesUDPNat(proxyPort uint16, excludeMark int, NFQNum uint16) {
 		log.Fatalf("Flush 失败: %v", err)
 	}
 }
-func CheckUpdate(pid int, excludePorts *sync.Map) {
+func CheckUpdate(pid int, excludePorts *comm.PortBitmap) {
 
 }

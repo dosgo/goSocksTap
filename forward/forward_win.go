@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dosgo/goSocksTap/comm"
 	"github.com/dosgo/goSocksTap/comm/udpProxy"
 	"github.com/dosgo/goSocksTap/winDivert"
 	"github.com/hashicorp/golang-lru/v2/expirable"
@@ -19,11 +20,11 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 	winDivert.CollectDNSRecords(dnsRecords)
 }
 
-func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map) {
+func RedirectAllTCP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *sync.Map) {
 	winDivert.RedirectAllTCP(proxyPort, excludePorts, originalPorts)
 }
 
-func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map, udpNat *udpProxy.UdpNat) {
+func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *sync.Map, udpNat *udpProxy.UdpNat) {
 	winDivert.RedirectAllUDP(proxyPort, excludePorts, originalPorts, udpNat)
 }
 
@@ -43,7 +44,7 @@ func flushWithAPI() error {
 	return nil
 }
 
-func CheckUpdate(pid int, excludePorts *sync.Map) {
+func CheckUpdate(pid int, excludePorts *comm.PortBitmap) {
 	winDivert.CloseNetEvent()
 	time.Sleep(time.Millisecond * 2)
 	go winDivert.NetEvent(pid, excludePorts)

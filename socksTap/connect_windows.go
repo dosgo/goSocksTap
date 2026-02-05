@@ -43,7 +43,7 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 				targetConn, err = getDialer(socksTap).Dial("tcp", remoteAddr)
 				if err == nil {
 					lAddr := targetConn.LocalAddr().(*net.TCPAddr)
-					defer socksTap.excludePorts.Delete(fmt.Sprintf("tcp:%d", uint16(lAddr.Port)))
+					defer socksTap.tcpExcludePorts.Delete(uint16(lAddr.Port))
 				}
 			}
 			if err != nil || targetConn == nil {
@@ -99,7 +99,7 @@ func (d *winDialer) dialTcp(address string) (net.Conn, error) {
 	}
 	// 4. 获取分配到的端口并回调记录
 	if sa, err := syscall.Getsockname(h); err == nil {
-		d.socksTap.excludePorts.Store(fmt.Sprintf("tcp:%d", sa.(*syscall.SockaddrInet4).Port), 1)
+		d.socksTap.tcpExcludePorts.Set(uint16(sa.(*syscall.SockaddrInet4).Port))
 	}
 
 	if err := syscall.Connect(h, rsa); err != nil {
@@ -120,7 +120,7 @@ func (d *winDialer) DialContext(ctx context.Context, network, address string) (n
 		conn, err := d.Dialer.Dial(network, address)
 		if err == nil {
 			lAddr := conn.LocalAddr().(*net.UDPAddr)
-			d.socksTap.excludePorts.Store(fmt.Sprintf("udp:%d", lAddr.Port), time.Now().Unix()) // 告诉 WinDivert
+			d.socksTap.udpExcludePorts.Set(uint16(lAddr.Port)) // 告诉 WinDivert
 		}
 		return conn, err
 	}
@@ -188,7 +188,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 			defer socksTap.udpClients.Delete(vPortKey)
 
 			if lport != 0 {
-				defer socksTap.excludePorts.Delete(fmt.Sprintf("udp:%d", lport)) // 告诉 WinDivert：这个端口发的包别拦
+				defer socksTap.udpExcludePorts.Delete(lport) // 告诉 WinDivert：这个端口发的包别拦
 			}
 			resp := make([]byte, 2048)
 			timeConn := comm.NewTimeoutConn(c, time.Second*80)

@@ -93,12 +93,12 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 	}
 }
 
-func NetEvent(pid int, excludePorts *sync.Map) {
+func NetEvent(pid int, excludePorts *comm.PortBitmap) {
 	excludePorts.Clear()
 	if pid > 0 {
 		bindPorts, _ := netstat.GetTcpBindList(pid, true)
 		for _, v := range bindPorts {
-			excludePorts.Store(fmt.Sprintf("tcp:%d", v), 1)
+			excludePorts.Set(v)
 		}
 	}
 	var filter = fmt.Sprintf("processId=%d or processId=%d", os.Getpid(), pid)
@@ -121,17 +121,17 @@ func NetEvent(pid int, excludePorts *sync.Map) {
 		switch addr.Event() {
 		case divert.EventSocketBind:
 			//	log.Printf("ip: %s\r\n", ip.String())
-			excludePorts.Store(fmt.Sprintf("tcp:%d", addr.Flow().LocalPort), 1)
+			excludePorts.Set(addr.Flow().LocalPort)
 		case divert.EventSocketConnect:
-			excludePorts.Store(fmt.Sprintf("tcp:%d", addr.Flow().LocalPort), 1)
+			excludePorts.Set(addr.Flow().LocalPort)
 		case divert.EventSocketClose:
 			//ip := net.IP(addr.Flow().LocalAddress[:4])
-			excludePorts.Delete(fmt.Sprintf("tcp:%d", addr.Flow().LocalPort))
+			excludePorts.Delete(addr.Flow().LocalPort)
 		}
 	}
 }
 
-func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map) {
+func RedirectAllTCP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *sync.Map) {
 	// 过滤器逻辑：拦截所有 TCP 流量，但排除：
 	// 1. 代理监听端口 (7080)
 	// 2. 代理程序用于外连的排除 IP (127.0.0.2)
@@ -173,7 +173,7 @@ func RedirectAllTCP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 				}
 			} else {
 				//本进程的过滤
-				if _, ok := excludePorts.Load(fmt.Sprintf("tcp:%d", srcPort)); !ok {
+				if ok := excludePorts.Has(srcPort); !ok {
 
 					if comm.IsProxyRequiredFast(dstIP.String()) {
 						// 场景 B：客户端发起的原始请求包 (访问任意端口)
@@ -223,7 +223,7 @@ func CloseNetEvent() {
 	}
 }
 
-func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *sync.Map, udpNat *udpProxy.UdpNat) {
+func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *sync.Map, udpNat *udpProxy.UdpNat) {
 	// 过滤器：拦截出站 UDP，排除回环、DNS(53) 和 代理端口自身
 	filter := fmt.Sprintf(
 		"!loopback and outbound  and udp and udp.DstPort != 53 and udp.DstPort != %d",
@@ -267,7 +267,7 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *sync.Map, originalPorts *syn
 			} else {
 				// 2. 处理客户端发出的请求包
 				// 排除代理程序自身的流量
-				if _, ok := excludePorts.Load(fmt.Sprintf("udp:%d", srcPort)); !ok {
+				if ok := excludePorts.Has(srcPort); !ok {
 					if comm.IsProxyRequiredFast(dstIP.String()) {
 						virtualPort := udpNat.GetVirtualPort(srcPort, dstIP, dstPort)
 						// 重定向：目标改为本地 IP，端口改为代理端口
