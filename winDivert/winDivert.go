@@ -94,7 +94,7 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 }
 
 func NetEvent(pid int, excludePorts *comm.PortBitmap) {
-	excludePorts.Clear()
+	//excludePorts.Clear()
 	if pid > 0 {
 		bindPorts, _ := netstat.GetTcpBindList(pid, true)
 		for _, v := range bindPorts {
