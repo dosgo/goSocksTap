@@ -551,6 +551,6 @@ func setupNftablesUDPNat(proxyPort uint16, excludeMark int, NFQNum uint16) {
 		log.Fatalf("Flush 失败: %v", err)
 	}
 }
-func CheckUpdate(pid int, excludePorts *comm.PortBitmap) {
+func CheckUpdate(pid int, excludePorts *comm.PortBitmap, udpExcludePorts *comm.PortBitmap) {
 
 }

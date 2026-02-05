@@ -90,7 +90,7 @@ func (socksTap *SocksTap) task() {
 			if err == nil && pid > 0 && pid != socksTap.socksServerPid {
 				socksTap.socksServerPid = pid
 				if runtime.GOOS == "windows" {
-					forward.CheckUpdate(socksTap.socksServerPid, socksTap.tcpExcludePorts)
+					forward.CheckUpdate(socksTap.socksServerPid, socksTap.tcpExcludePorts, socksTap.udpExcludePorts)
 				}
 			}
 		}

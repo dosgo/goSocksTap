@@ -44,8 +44,8 @@ func flushWithAPI() error {
 	return nil
 }
 
-func CheckUpdate(pid int, excludePorts *comm.PortBitmap) {
+func CheckUpdate(pid int, tcpExcludePorts *comm.PortBitmap, udpExcludePorts *comm.PortBitmap) {
 	winDivert.CloseNetEvent()
 	time.Sleep(time.Millisecond * 2)
-	go winDivert.NetEvent(pid, excludePorts)
+	go winDivert.NetEvent(pid, tcpExcludePorts, udpExcludePorts)
 }

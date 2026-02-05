@@ -93,12 +93,22 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 	}
 }
 
-func NetEvent(pid int, excludePorts *comm.PortBitmap) {
-	//excludePorts.Clear()
+func NetEvent(pid int, tcpExcludePorts *comm.PortBitmap, udpExcludePorts *comm.PortBitmap) {
 	if pid > 0 {
-		bindPorts, _ := netstat.GetTcpBindList(pid, true)
-		for _, v := range bindPorts {
-			excludePorts.Set(v)
+		bindPorts, err := netstat.GetTcpBindList(pid, true)
+		if err == nil {
+			for _, v := range bindPorts {
+				log.Printf("add tcp port:%d\r\n", v)
+				tcpExcludePorts.Set(v)
+			}
+		}
+		bindPorts, err = netstat.GetUdpBindList(pid, true)
+		if err == nil {
+			udpExcludePorts.Clear()
+			for _, v := range bindPorts {
+				log.Printf("add udp port:%d\r\n", v)
+				udpExcludePorts.Set(v)
+			}
 		}
 	}
 	var filter = fmt.Sprintf("processId=%d or processId=%d", os.Getpid(), pid)
@@ -121,12 +131,34 @@ func NetEvent(pid int, excludePorts *comm.PortBitmap) {
 		switch addr.Event() {
 		case divert.EventSocketBind:
 			//	log.Printf("ip: %s\r\n", ip.String())
-			excludePorts.Set(addr.Flow().LocalPort)
+			if addr.Flow().Protocol == 6 {
+				tcpExcludePorts.Set(addr.Flow().LocalPort)
+			}
+			if addr.Flow().Protocol == 17 {
+				udpExcludePorts.Set(addr.Flow().LocalPort)
+			}
 		case divert.EventSocketConnect:
-			excludePorts.Set(addr.Flow().LocalPort)
+			if addr.Flow().Protocol == 6 {
+				tcpExcludePorts.Set(addr.Flow().LocalPort)
+			}
+			if addr.Flow().Protocol == 17 {
+				udpExcludePorts.Set(addr.Flow().LocalPort)
+			}
+		case divert.EventSocketListen:
+			if addr.Flow().Protocol == 6 {
+				tcpExcludePorts.Set(addr.Flow().LocalPort)
+			}
+			if addr.Flow().Protocol == 17 {
+				udpExcludePorts.Set(addr.Flow().LocalPort)
+			}
 		case divert.EventSocketClose:
 			//ip := net.IP(addr.Flow().LocalAddress[:4])
-			excludePorts.Delete(addr.Flow().LocalPort)
+			if addr.Flow().Protocol == 6 {
+				tcpExcludePorts.Delete(addr.Flow().LocalPort)
+			}
+			if addr.Flow().Protocol == 17 {
+				udpExcludePorts.Delete(addr.Flow().LocalPort)
+			}
 		}
 	}
 }
