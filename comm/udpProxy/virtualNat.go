@@ -2,7 +2,7 @@ package udpProxy
 
 import (
 	"fmt"
-	"net"
+	"net/netip"
 	"sync"
 	"time"
 )
@@ -11,8 +11,7 @@ import (
 
 type UdpSession struct {
 	SrcPort  uint16
-	DstIP    net.IP
-	DstPort  uint16
+	DstAddr  netip.AddrPort
 	lastTime int64
 }
 
@@ -34,7 +33,7 @@ func NewUdpNat() *UdpNat {
 	go info.clear()
 	return info
 }
-func (udpNat *UdpNat) GetVirtualPort(srcPort uint16, dstIP net.IP, dstPort uint16) uint16 {
+func (udpNat *UdpNat) GetVirtualPort(srcPort uint16, dstIP netip.Addr, dstPort uint16) uint16 {
 	udpNat.portMu.Lock()
 	defer udpNat.portMu.Unlock()
 	// 构造唯一 Key
@@ -53,7 +52,7 @@ func (udpNat *UdpNat) GetVirtualPort(srcPort uint16, dstIP net.IP, dstPort uint1
 	}
 
 	p := udpNat.udpFakePort
-	udpNat.fakeTable.Store(p, &UdpSession{srcPort, dstIP, dstPort, time.Now().Unix()})
+	udpNat.fakeTable.Store(p, &UdpSession{srcPort, netip.AddrPortFrom(dstIP, dstPort), time.Now().Unix()})
 	udpNat.reverseTable.Store(key, p)
 	return p
 }
@@ -73,7 +72,7 @@ func (udpNat *UdpNat) clear() {
 			session := value.(*UdpSession)
 			if time.Now().Unix()-session.lastTime > 60 {
 				udpNat.fakeTable.Delete(key)
-				udpNat.reverseTable.Delete(fmt.Sprintf("%d-%s-%d", session.SrcPort, session.DstIP.String(), session.DstPort))
+				udpNat.reverseTable.Delete(fmt.Sprintf("%d-%s-%d", session.SrcPort, session.DstAddr.Addr().String(), session.DstAddr.Port()))
 			}
 			return true
 		})

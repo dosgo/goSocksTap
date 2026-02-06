@@ -141,7 +141,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 		log.Printf("no origPort clientAddr.Port:%d\r\n", clientAddr.Port)
 		return
 	}
-	origPort := addrInfo.DstPort
+	origPort := addrInfo.DstAddr.Port()
 
 	vPortKey := uint16(clientAddr.Port)
 	// 检查这个“客户端”是否已经有对应的“转发隧道”了

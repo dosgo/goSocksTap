@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"strings"
@@ -203,8 +204,8 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, udpNat *udp
 			return 0
 		}
 
-		srcIP := net.IP(packet[12:16])
-		dstIP := net.IP(packet[16:20])
+		srcIP := netip.AddrFrom4([4]byte(packet[12:16]))
+		dstIP := netip.AddrFrom4([4]byte(packet[16:20]))
 		srcPort := binary.BigEndian.Uint16(packet[20:22])
 		dstPort := binary.BigEndian.Uint16(packet[22:24])
 
@@ -214,7 +215,7 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, udpNat *udp
 			vPort := dstPort
 			addrInfo := udpNat.GetAddrFromVirtualPort(vPort)
 			if addrInfo != nil {
-				modified, err := modifyUDP(packet, addrInfo.DstIP, srcIP, addrInfo.DstPort, addrInfo.SrcPort)
+				modified, err := modifyUDP(packet, addrInfo.DstAddr.Addr(), srcIP, addrInfo.DstAddr.Port(), addrInfo.SrcPort)
 
 				if err == nil {
 					// 提交修改后的数据包
@@ -250,15 +251,15 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, udpNat *udp
 	}
 
 }
-func modifyUDP(packet []byte, newSrcIP, newDstIP net.IP, newSrcPort, newDstPort uint16) ([]byte, error) {
+func modifyUDP(packet []byte, newSrcIP, newDstIP netip.Addr, newSrcPort, newDstPort uint16) ([]byte, error) {
 	// 解析
 	pkt := gopacket.NewPacket(packet, layers.LayerTypeIPv4, gopacket.NoCopy)
 	ipLayer := pkt.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
 	udpLayer := pkt.Layer(layers.LayerTypeUDP).(*layers.UDP)
 
 	// 修改地址
-	ipLayer.SrcIP = newSrcIP
-	ipLayer.DstIP = newDstIP
+	ipLayer.SrcIP = newSrcIP.AsSlice()
+	ipLayer.DstIP = newDstIP.AsSlice()
 	udpLayer.SrcPort = layers.UDPPort(newSrcPort) // gopacket 中端口类型通用
 	udpLayer.DstPort = layers.UDPPort(newDstPort)
 

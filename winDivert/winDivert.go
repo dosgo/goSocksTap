@@ -190,7 +190,7 @@ func RedirectAllTCP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPor
 		outbound := (addr.Flags & (0x01 << 1)) != 0 // 判断是否为出站数据包
 		srcIP, srcPort, dstIP, dstPort := comm.ParsePacketInfoFast(packet)
 		modifiedPacket = false
-		if outbound && srcIP != nil {
+		if outbound && !dstIP.IsUnspecified() {
 			// 场景 A：代理程序发送给客户端的回包 (此时 SrcPort 是 proxyPort)
 			if srcPort == proxyPort {
 				// 通过映射表查找该连接原始对应的客户端端口
@@ -280,13 +280,13 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, udpNat *udp
 		outbound := (addr.Flags & (0x01 << 1)) != 0
 		srcIP, srcPort, dstIP, dstPort := comm.ParsePacketInfoFast(packet)
 
-		if outbound && srcIP != nil {
+		if outbound && !dstIP.IsUnspecified() {
 			// 1. 处理代理发回给客户端的包 (源端口是 proxyPort)
 			if srcPort == proxyPort {
 				virtualPort := dstPort
 				addrInfo := udpNat.GetAddrFromVirtualPort(virtualPort)
 				if addrInfo != nil {
-					comm.ModifyPacketFast(packet, addrInfo.DstIP, addrInfo.DstPort, srcIP, addrInfo.SrcPort)
+					comm.ModifyPacketFast(packet, addrInfo.DstAddr.Addr(), addrInfo.DstAddr.Port(), srcIP, addrInfo.SrcPort)
 					//	log.Printf("dstIp:%s srcIP:%s\r\n", dstIP.String(), srcIP.String())
 					addr.Flags = addr.Flags & ^uint8(0x02) // 设为入站
 					divert.CalcChecksums(packet, &addr, 0)
