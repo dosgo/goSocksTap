@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -163,13 +162,13 @@ func ForceRestartWithGID(pid int) (int, error) {
 var mark int = 0x1aa
 var gid uint32 = 2000
 
-func RedirectAllTCP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *sync.Map) {
+func RedirectAllTCP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *comm.PortNAT) {
 	cleanupNftables("my_proxy_tcp")
 	cleanupNftables("my_transparent_proxy")
 	setupNftables("matchNet", uint16(proxyPort), mark)
 }
 
-func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *sync.Map, udpNat *udpProxy.UdpNat) {
+func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, udpNat *udpProxy.UdpNat) {
 	cleanupNftables("my_proxy_udp")
 	var nfnum uint16 = 100
 	setupNftablesUDPNat(uint16(proxyPort), mark, nfnum)

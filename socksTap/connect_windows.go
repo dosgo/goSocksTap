@@ -25,11 +25,10 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		// 核心点：由于使用了反射，conn.RemoteAddr() 实际上是原始的目标服务器地址
 		//	log.Printf("[拦截流量] 目标: %s\n", tcpAddr.String())
-		key := fmt.Sprintf("%d", tcpAddr.Port)
-		if origPort, ok := socksTap.originalPorts.Load(key); ok {
+		if origPort, ok := socksTap.originalPorts.Get(uint16(tcpAddr.Port)); ok {
 			var targetConn net.Conn
 			var err error
-			remoteAddr := net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16))))
+			remoteAddr := net.JoinHostPort(tcpAddr.IP.String(), strconv.Itoa(int(origPort)))
 
 			isExclude := false
 			//排除id
@@ -38,7 +37,7 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 			}
 
 			if socksTap.localSocks != "" && !isExclude {
-				targetConn, err = socksTap.connectProxy(tcpAddr.IP.String(), strconv.Itoa(int(origPort.(uint16))), "tcp")
+				targetConn, err = socksTap.connectProxy(tcpAddr.IP.String(), strconv.Itoa(int(origPort)), "tcp")
 			} else {
 				targetConn, err = getDialer(socksTap).Dial("tcp", remoteAddr)
 				if err == nil {
@@ -53,7 +52,7 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 			targetConn = comm.NewTimeoutConn(targetConn, time.Second*120)
 			//log.Printf("src port:%d\r\n", targetConn.LocalAddr().(*net.TCPAddr).Port)
 			defer targetConn.Close()
-			defer socksTap.originalPorts.Delete(key)
+			defer socksTap.originalPorts.Delete(uint16(tcpAddr.Port))
 			// 双向数据拷贝 (你可以在这里打印/记录 payload 内容)
 			localConn := comm.NewTimeoutConn(conn, time.Second*120)
 			go func() {
@@ -144,7 +143,7 @@ func (socksTap *SocksTap) handleUDPData(localConn *net.UDPConn, clientAddr *net.
 	}
 	origPort := addrInfo.DstPort
 
-	vPortKey := fmt.Sprintf("udp:%d", clientAddr.Port)
+	vPortKey := uint16(clientAddr.Port)
 	// 检查这个“客户端”是否已经有对应的“转发隧道”了
 	conn, ok := socksTap.udpClients.Load(vPortKey)
 	if !ok {

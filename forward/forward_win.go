@@ -5,7 +5,6 @@ package forward
 
 import (
 	"fmt"
-	"sync"
 	"syscall"
 	"time"
 
@@ -20,12 +19,12 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 	winDivert.CollectDNSRecords(dnsRecords)
 }
 
-func RedirectAllTCP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *sync.Map) {
+func RedirectAllTCP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *comm.PortNAT) {
 	winDivert.RedirectAllTCP(proxyPort, excludePorts, originalPorts)
 }
 
-func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *sync.Map, udpNat *udpProxy.UdpNat) {
-	winDivert.RedirectAllUDP(proxyPort, excludePorts, originalPorts, udpNat)
+func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, udpNat *udpProxy.UdpNat) {
+	winDivert.RedirectAllUDP(proxyPort, excludePorts, udpNat)
 }
 
 func Stop() {

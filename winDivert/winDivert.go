@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync"
 
 	"github.com/dosgo/goSocksTap/comm"
 	"github.com/dosgo/goSocksTap/comm/netstat"
@@ -163,7 +162,7 @@ func NetEvent(pid int, tcpExcludePorts *comm.PortBitmap, udpExcludePorts *comm.P
 	}
 }
 
-func RedirectAllTCP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *sync.Map) {
+func RedirectAllTCP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *comm.PortNAT) {
 	// 过滤器逻辑：拦截所有 TCP 流量，但排除：
 	// 1. 代理监听端口 (7080)
 	// 2. 代理程序用于外连的排除 IP (127.0.0.2)
@@ -195,10 +194,10 @@ func RedirectAllTCP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPor
 			// 场景 A：代理程序发送给客户端的回包 (此时 SrcPort 是 proxyPort)
 			if srcPort == proxyPort {
 				// 通过映射表查找该连接原始对应的客户端端口
-				key := fmt.Sprintf("%d", dstPort)
-				if origPort, ok := originalPorts.Load(key); ok {
+
+				if origPort, ok := originalPorts.Get(dstPort); ok {
 					// 将包伪装成：从“真实服务器”发往“客户端原始端口”
-					comm.ModifyPacketFast(packet, dstIP, origPort.(uint16), srcIP, dstPort)
+					comm.ModifyPacketFast(packet, dstIP, origPort, srcIP, dstPort)
 					// 修改为入站包，欺骗协议栈
 					addr.Flags = addr.Flags & ^uint8(0x02)
 					modifiedPacket = true
@@ -210,8 +209,7 @@ func RedirectAllTCP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPor
 					if comm.IsProxyRequiredFast(dstIP.String()) {
 						// 场景 B：客户端发起的原始请求包 (访问任意端口)
 						// 记录原始端口信息，以便后续回包还原
-						key := fmt.Sprintf("%d", srcPort)
-						originalPorts.Store(key, dstPort)
+						originalPorts.Set(srcPort, dstPort)
 						//log.Printf("save key:%s->%d\r\n", key, int(dstPort))
 						// 反射逻辑：将目标 IP 改为本地，端口改为代理端口，并设为入站
 						comm.ModifyPacketFast(packet, dstIP, srcPort, srcIP, proxyPort)
@@ -255,7 +253,7 @@ func CloseNetEvent() {
 	}
 }
 
-func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, originalPorts *sync.Map, udpNat *udpProxy.UdpNat) {
+func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, udpNat *udpProxy.UdpNat) {
 	// 过滤器：拦截出站 UDP，排除回环、DNS(53) 和 代理端口自身
 	filter := fmt.Sprintf(
 		"!loopback and outbound  and udp and udp.DstPort != 53 and udp.DstPort != %d",

@@ -28,17 +28,16 @@ var randPorts = []uint16{
 }
 
 type SocksTap struct {
-	proxyPort   uint16
-	localSocks  string
-	mode        int //0全局代理 1绕过局域网和中国大陆地址代理
-	dnsRecords  *expirable.LRU[string, string]
-	run         bool
-	useUdpRelay bool
-	udpClients  *sync.Map
-	//excludePorts    *sync.Map
+	proxyPort       uint16
+	localSocks      string
+	mode            int //0全局代理 1绕过局域网和中国大陆地址代理
+	dnsRecords      *expirable.LRU[string, string]
+	run             bool
+	useUdpRelay     bool
+	udpClients      *sync.Map
 	udpExcludePorts *comm.PortBitmap
 	tcpExcludePorts *comm.PortBitmap
-	originalPorts   *sync.Map
+	originalPorts   *comm.PortNAT
 	udpNat          *udpProxy.UdpNat
 	socksServerPid  int
 }
@@ -53,7 +52,7 @@ func NewSocksTap(localSocks string, mode int, useUdpRelay bool) *SocksTap {
 	info.udpClients = &sync.Map{}
 	info.tcpExcludePorts = &comm.PortBitmap{}
 	info.udpExcludePorts = &comm.PortBitmap{}
-	info.originalPorts = &sync.Map{}
+	info.originalPorts = comm.NewPortNAT()
 	return info
 }
 
@@ -75,7 +74,7 @@ func (socksTap *SocksTap) Start() {
 		socksTap.udpNat = udpProxy.NewUdpNat()
 		go socksTap.startLocalUDPRelay()
 		// 开启 WinDivert UDP 拦截
-		go forward.RedirectAllUDP(socksTap.proxyPort, socksTap.udpExcludePorts, socksTap.originalPorts, socksTap.udpNat)
+		go forward.RedirectAllUDP(socksTap.proxyPort, socksTap.udpExcludePorts, socksTap.udpNat)
 	}
 }
 func (socksTap *SocksTap) Close() {
