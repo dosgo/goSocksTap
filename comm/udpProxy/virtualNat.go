@@ -1,7 +1,6 @@
 package udpProxy
 
 import (
-	"fmt"
 	"net/netip"
 	"sync"
 	"time"
@@ -13,6 +12,10 @@ type UdpSession struct {
 	SrcPort  uint16
 	DstAddr  netip.AddrPort
 	lastTime int64
+}
+type sessionKey struct {
+	srcPort uint16
+	dstAddr netip.AddrPort
 }
 
 type UdpNat struct {
@@ -37,8 +40,8 @@ func (udpNat *UdpNat) GetVirtualPort(srcPort uint16, dstIP netip.Addr, dstPort u
 	udpNat.portMu.Lock()
 	defer udpNat.portMu.Unlock()
 	// 构造唯一 Key
-	key := fmt.Sprintf("%d-%s-%d", srcPort, dstIP.String(), dstPort)
-
+	//key := fmt.Sprintf("%d-%s-%d", srcPort, dstIP.String(), dstPort)
+	key := sessionKey{srcPort, netip.AddrPortFrom(dstIP, dstPort)}
 	// 1. 先检查是否已经分配过
 	if val, ok := udpNat.reverseTable.Load(key); ok {
 		udpNat.GetAddrFromVirtualPort(val.(uint16))
@@ -72,7 +75,7 @@ func (udpNat *UdpNat) clear() {
 			session := value.(*UdpSession)
 			if time.Now().Unix()-session.lastTime > 60 {
 				udpNat.fakeTable.Delete(key)
-				udpNat.reverseTable.Delete(fmt.Sprintf("%d-%s-%d", session.SrcPort, session.DstAddr.Addr().String(), session.DstAddr.Port()))
+				udpNat.reverseTable.Delete(sessionKey{session.SrcPort, session.DstAddr})
 			}
 			return true
 		})
