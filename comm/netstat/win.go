@@ -16,6 +16,9 @@ import (
 /*为啥要用这方法,因为Process在一些电脑比较耗时间只有匹配的才获取*/
 func PortGetPid(laddr string) (int, error) {
 	u, err := url.Parse(laddr)
+	if err != nil {
+		return 0, err
+	}
 	port, err := strconv.Atoi(u.Port())
 	if err != nil {
 		return 0, err
