@@ -5,6 +5,7 @@ package netstat
 
 import (
 	"errors"
+	"log"
 	"net/url"
 	"os"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 func PortGetPid(laddr string) (int, error) {
 	u, err := url.Parse(laddr)
 	if err != nil {
+		log.Printf("socks addr:%s\r\n", laddr)
 		return 0, err
 	}
 	port, err := strconv.Atoi(u.Port())
