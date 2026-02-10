@@ -50,8 +50,8 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 
 	for {
 		recvLen, err := dnsDivert.Recv(inboundBuf, &addr)
-		if err != nil {
-			continue
+		if err != nil || recvLen == 0 {
+			break
 		}
 
 		// 1. 定位 DNS Payload 位置
