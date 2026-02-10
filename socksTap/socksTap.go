@@ -81,7 +81,12 @@ func (socksTap *SocksTap) Start() {
 }
 func (socksTap *SocksTap) Close() {
 	socksTap.run = false
-	socksTap.tcpListener.Close()
+	if socksTap.tcpListener != nil {
+		socksTap.tcpListener.Close()
+	}
+	if socksTap.udpListener != nil {
+		socksTap.udpListener.Close()
+	}
 	forward.Stop()
 }
 
