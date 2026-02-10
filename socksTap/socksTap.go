@@ -40,6 +40,8 @@ type SocksTap struct {
 	originalPorts   *comm.PortNAT
 	udpNat          *udpProxy.UdpNat
 	socksServerPid  int
+	tcpListener     net.Listener
+	udpListener     *net.UDPConn
 }
 
 func NewSocksTap(localSocks string, mode int, useUdpRelay bool) *SocksTap {
@@ -79,6 +81,7 @@ func (socksTap *SocksTap) Start() {
 }
 func (socksTap *SocksTap) Close() {
 	socksTap.run = false
+	socksTap.tcpListener.Close()
 	forward.Stop()
 }
 
@@ -99,13 +102,15 @@ func (socksTap *SocksTap) task() {
 
 // 代理中转逻辑
 func (socksTap *SocksTap) startLocalRelay() {
-	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", socksTap.proxyPort))
+	var err error
+	socksTap.tcpListener, err = net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", socksTap.proxyPort))
 	if err != nil {
 		log.Fatalf("代理监听失败: %v", err)
 	}
+	defer socksTap.udpListener.Close()
 	log.Printf("startLocalRelay:%d\r\n", socksTap.proxyPort)
-	for {
-		conn, err := ln.Accept()
+	for socksTap.run {
+		conn, err := socksTap.tcpListener.Accept()
 		if err != nil {
 			continue
 		}
@@ -115,22 +120,23 @@ func (socksTap *SocksTap) startLocalRelay() {
 
 func (socksTap *SocksTap) startLocalUDPRelay() {
 	addr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("0.0.0.0:%d", socksTap.proxyPort))
-	conn, err := net.ListenUDP("udp", addr)
+	var err error
+	socksTap.udpListener, err = net.ListenUDP("udp", addr)
 	if err != nil {
 		log.Fatalf("UDP 代理监听失败: %v", err)
 	}
-	defer conn.Close()
+	defer socksTap.udpListener.Close()
 
 	log.Printf("UDP Relay 启动在端口: %d\n", socksTap.proxyPort)
 
 	buf := make([]byte, 1024*3)
-	for {
-		n, remoteAddr, err := conn.ReadFromUDP(buf)
+	for socksTap.run {
+		n, remoteAddr, err := socksTap.udpListener.ReadFromUDP(buf)
 		if err != nil {
 			continue
 		}
 		// 处理每个 UDP 报文
-		socksTap.handleUDPData(conn, remoteAddr, buf[:n])
+		socksTap.handleUDPData(socksTap.udpListener, remoteAddr, buf[:n])
 	}
 }
 
