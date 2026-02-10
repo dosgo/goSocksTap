@@ -39,11 +39,11 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 	// 使用 ETH_P_ALL (0x0003) 的转换结果
 	fd, err := syscall.Socket(syscall.AF_PACKET, syscall.SOCK_RAW, int(Htons(0x0003)))
 	if err != nil {
-		log.Fatalf("创建 Socket 失败: %v", err)
+		log.Fatalf("raw Socket err: %v", err)
 	}
 	defer syscall.Close(fd)
 
-	log.Println("DNS 采集器已启动 (强力匹配模式)...")
+	log.Println("CollectDNSRecords start ")
 
 	buf := make([]byte, 65536)
 	for {
@@ -101,7 +101,7 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 			if answer.Type == layers.DNSTypeA {
 				ip := answer.IP.String()
 				dnsRecords.Add(ip, name)
-				//log.Printf("捕获成功: %s -> %s\n", name, ip)
+				//log.Printf("add do: %s -> %s\n", name, ip)
 			}
 		}
 	}
@@ -148,9 +148,9 @@ func ForceRestartWithGID(pid int) (int, error) {
 		Setsid: true, // 让它在后台独立运行
 	}
 
-	log.Printf("[*] 正在重启 PID %d: %s (UID: %d, GID: %d)\n", pid, exe, originalUid, gid)
+	log.Printf("[*] restart PID %d: %s (UID: %d, GID: %d)\n", pid, exe, originalUid, gid)
 	if err := cmd.Start(); err != nil {
-		return 0, fmt.Errorf("启动新进程失败: %v", err)
+		return 0, fmt.Errorf("start err: %v", err)
 	}
 	// 获取新生成的 PID
 	newPid := cmd.Process.Pid
@@ -463,7 +463,7 @@ func addNetworkSet(c *nftables.Conn, set *nftables.Set) error {
 	}
 	c.FlushSet(set)
 	if err := c.SetAddElements(set, element); err != nil {
-		log.Printf("续期失败: %v", err)
+		log.Printf("err: %v", err)
 	}
 	return c.Flush() // 必须 Flush 才会生效
 }

@@ -68,7 +68,7 @@ var dialer = &net.Dialer{
 			// 给代理发出的包打上 0x1A 标记，避免被 iptables 再次拦截
 			err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, forward.GetMark())
 			if err != nil {
-				log.Printf("设置 SO_MARK 失败: %v", err)
+				log.Printf("set SO_MARK err: %v", err)
 			}
 		})
 	}}

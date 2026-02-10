@@ -76,11 +76,11 @@ func redirectAllTCP() {
 
 	handle, err := divert.Open(filter, divert.LayerNetwork, 0, divert.FlagDefault)
 	if err != nil {
-		log.Fatalf("WinDivert 打开失败: %v", err)
+		log.Fatalf("WinDivert open err: %v", err)
 	}
 	defer handle.Close()
 
-	log.Printf("全端口透明代理已启动...\n, 代理端口: %d\n", proxyPort)
+	log.Printf("redirectAllTCP...\n, port: %d\n", proxyPort)
 
 	var addr divert.Address
 	buf := make([]byte, 1024*10)

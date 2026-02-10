@@ -81,11 +81,11 @@ func CollectDNSRecords(dnsRecords *expirable.LRU[string, string]) {
 				switch rr := answer.(type) {
 				case *dns.A:
 					dnsRecords.Add(rr.A.String(), name)
-					//log.Printf("[DNS A] 域名: %s -> IP: %s", name, rr.A.String())
+					//log.Printf("add : %s -> IP: %s", name, rr.A.String())
 				// 这里可以执行你的 GeoIP 分流逻辑
 				case *dns.AAAA:
 					//dnsRecords.Add(rr.AAAA.String(), name)
-					//log.Printf("[DNS AAAA] 域名: %s -> IPv6: %s", name, rr.AAAA.String())
+					//log.Printf("add : %s -> IPv6: %s", name, rr.AAAA.String())
 				}
 			}
 		}
@@ -263,7 +263,7 @@ func RedirectAllUDP(proxyPort uint16, excludePorts *comm.PortBitmap, udpNat *udp
 	var err error
 	udpDivert, err = divert.Open(filter, divert.LayerNetwork, 0, divert.FlagDefault)
 	if err != nil {
-		log.Printf("WinDivert UDP 打开失败: %v", err)
+		log.Printf("WinDivert UDP open err: %v", err)
 		return
 	}
 	defer udpDivert.Close()

@@ -24,7 +24,6 @@ func (socksTap *SocksTap) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		// 核心点：由于使用了反射，conn.RemoteAddr() 实际上是原始的目标服务器地址
-		//	log.Printf("[拦截流量] 目标: %s\n", tcpAddr.String())
 		if origPort, ok := socksTap.originalPorts.Get(uint16(tcpAddr.Port)); ok {
 			var targetConn net.Conn
 			var err error

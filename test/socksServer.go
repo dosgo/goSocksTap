@@ -17,7 +17,7 @@ func main() {
 	// 等待停止信号
 	<-sig
 
-	log.Println("服务器已停止")
+	log.Println("stop")
 }
 
 func socksServer() {
