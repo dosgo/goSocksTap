@@ -111,8 +111,9 @@ func (socksTap *SocksTap) startLocalRelay() {
 	socksTap.tcpListener, err = net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", socksTap.proxyPort))
 	if err != nil {
 		log.Fatalf("代理监听失败: %v", err)
+		return
 	}
-	defer socksTap.udpListener.Close()
+	defer socksTap.tcpListener.Close()
 	log.Printf("startLocalRelay:%d\r\n", socksTap.proxyPort)
 	for socksTap.run {
 		conn, err := socksTap.tcpListener.Accept()
@@ -129,6 +130,7 @@ func (socksTap *SocksTap) startLocalUDPRelay() {
 	socksTap.udpListener, err = net.ListenUDP("udp", addr)
 	if err != nil {
 		log.Fatalf("UDP 代理监听失败: %v", err)
+		return
 	}
 	defer socksTap.udpListener.Close()
 

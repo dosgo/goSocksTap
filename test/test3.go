@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,9 +17,8 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	// 3. 注册信号
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	fmt.Println("服务已启动...")
 
 	sig := <-sigCh
-	fmt.Printf("\n接收到信号: %v，正在执行清理...\n", sig)
+	log.Printf("\n接收到信号: %v，正在执行清理...\n", sig)
 
 }
