@@ -110,7 +110,7 @@ func (socksTap *SocksTap) startLocalRelay() {
 	var err error
 	socksTap.tcpListener, err = net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", socksTap.proxyPort))
 	if err != nil {
-		log.Fatalf("代理监听失败: %v", err)
+		log.Fatalf("UDP listen err: %v", err)
 		return
 	}
 	defer socksTap.tcpListener.Close()
@@ -129,12 +129,12 @@ func (socksTap *SocksTap) startLocalUDPRelay() {
 	var err error
 	socksTap.udpListener, err = net.ListenUDP("udp", addr)
 	if err != nil {
-		log.Fatalf("UDP 代理监听失败: %v", err)
+		log.Fatalf("UDP listen err: %v", err)
 		return
 	}
 	defer socksTap.udpListener.Close()
 
-	log.Printf("UDP Relay 启动在端口: %d\n", socksTap.proxyPort)
+	log.Printf("startLocalUDPRelay: %d\n", socksTap.proxyPort)
 
 	buf := make([]byte, 1024*3)
 	for socksTap.run {
@@ -163,7 +163,7 @@ func (w *socksConnWrapper) Close() error {
 func (socksTap *SocksTap) connectProxy(ip string, origPort string, network string) (*socksConnWrapper, error) {
 	socksClient, err := socks5.NewDialer(socksTap.localSocks)
 	if err != nil {
-		log.Printf("SOCKS5 拨号失败: %v", err)
+		log.Printf("SOCKS5 Dial err: %v", err)
 		return nil, err
 	}
 	var underlyingConn net.Conn
